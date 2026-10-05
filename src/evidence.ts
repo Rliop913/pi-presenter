@@ -52,7 +52,21 @@ export function unique(ids: string[], label: string) {
 }
 
 /** Conservative numeric gate: exact lexical numbers, no derived arithmetic or invented metrics. */
-export function numbers(text: string): string[] { return text.match(/[-+]?\d+(?:[.,]\d+)*(?:%|\b)/g) ?? []; }
+/**
+ * Conservative numeric gate: exact lexical numbers, no derived arithmetic
+ * or invented metrics. The lookbehind/lookahead require a non-word,
+ * non-hyphen boundary on both sides, so numbers embedded inside
+ * identifiers (e.g. `rliop913`, `v2.0`, `slide-3`) are NOT matched.
+ * Only standalone numeric values like `100 requests`, `15.5%`, `1,000`
+ * are returned.
+ */
+// The lookbehind also excludes `.` so the trailing `0` in a version-like
+// identifier such as `v2.0` is not matched on its own (the `.` between
+// digits is a valid boundary for the regex but not for a human reader).
+// Standalone decimals like `1.5` still match because the match starts at
+// the leading digit, not at the `.`.
+const NUMBER_PATTERN = /(?<![\w.-])[-+]?\d+(?:[.,]\d+)*%?(?![\w-])/g;
+export function numbers(text: string): string[] { return text.match(NUMBER_PATTERN) ?? []; }
 export function groundedNumbers(text: string, support: string) {
   const allowed = new Set(numbers(support));
   if (numbers(text).some(n => !allowed.has(n))) throw new Error(`Unsupported numeric assertion: ${text}`);
@@ -109,7 +123,7 @@ export function validateStoryboard(value: unknown, evidence: Evidence, contract:
   return board;
 }
 
-export function validateDeck(value: unknown, evidence: Evidence, board: Storyboard, sources: Source[]): Deck {
+export function validateDeck(value: unknown, evidence: Evidence, board: Storyboard, _sources: Source[]): Deck {
   const deck = deckSchema.parse(value);
   if (deck.slides.length !== board.slides.length) throw new Error('Deck slide count mismatch');
   unique(deck.slides.map(s => s.id), 'slide ids');
