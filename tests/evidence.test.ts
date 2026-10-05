@@ -101,9 +101,10 @@ test('groundedNumbers ignores digits embedded in identifiers (regression)', () =
 test('evidenceSchema defaults claims to [] when missing (regression: model truncation)', () => {
   // Before the .default([]) fix, a model that returned an object missing
   // `claims` would fail with a cryptic "expected array, received undefined"
-  // Zod error. Now it defaults to [] and fails with the clearer
-  // "Array must contain at least 1 element(s)" error on the .min(1) check.
-  assert.throws(() => evidenceSchema.parse({ figures: [] }), /at least 1 element/);
+  // Zod error. Now it defaults to [] and fails with an actionable message
+  // that tells the user what to do (provide a longer/more factual source,
+  // or retry with a different model).
+  assert.throws(() => evidenceSchema.parse({ figures: [] }), /evidence_researcher returned an empty claims database/);
 });
 
 test('evidenceSchema defaults figures to [] when missing', () => {
@@ -117,6 +118,7 @@ test('evidenceSchema defaults figures to [] when missing', () => {
 test('evidenceSchema accepts an empty object and surfaces the .min(1) failure', () => {
   // The most common model-mistake case: the model returns {}.
   // Before: cryptic "expected array, received undefined" x2.
-  // After: single clear error about claims needing >= 1 element.
-  assert.throws(() => evidenceSchema.parse({}), /at least 1 element/);
+  // After: single clear error about claims needing >= 1 element, with
+  // actionable guidance for the user.
+  assert.throws(() => evidenceSchema.parse({}), /evidence_researcher returned an empty claims database/);
 });

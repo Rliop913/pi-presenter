@@ -31,7 +31,7 @@ export const figureSchema = z.object({ id, title: text, sourceId: id, quote: lon
 // `.refine()` enforces the "at least one claim" contract because Zod's
 // `.default()` bypasses subsequent per-field validators on the default
 // value itself.
-export const evidenceSchema = z.object({ claims: z.array(claimSchema).max(150).default([]), figures: z.array(figureSchema).max(20).default([]) }).strict().refine((d) => d.claims.length >= 1, { message: 'claims must contain at least 1 element', path: ['claims'] });
+export const evidenceSchema = z.object({ claims: z.array(claimSchema).max(150).default([]), figures: z.array(figureSchema).max(20).default([]) }).strict().refine((d) => d.claims.length >= 1, { message: 'evidence_researcher returned an empty claims database. The source text may be too short, not contain factual claims, or the model failed to extract them. Provide a longer or more factual source, or retry with a different model.', path: ['claims'] });
 export type Evidence = z.infer<typeof evidenceSchema>;
 export const directorSchema = z.object({ objective: long, thesis: long, successCriteria: z.array(text).min(1).max(6) }).strict();
 export const argumentSchema = z.object({ thesis: long, sections: z.array(z.object({ title: text, claimIds: z.array(id).min(1).max(10), rationale: long }).strict()).min(1).max(30) }).strict();
