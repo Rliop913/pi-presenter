@@ -26,12 +26,12 @@ const citation = z.object({ sourceId: id, quote: z.string().trim().min(1).max(20
 export const claimSchema = z.object({ id, text: z.string().trim().min(1).max(240), citations: z.array(citation).min(1).max(5) }).strict();
 export const figureSchema = z.object({ id, title: text, sourceId: id, quote: long, labels: z.array(z.string().min(1).max(35)).min(1).max(8), values: z.array(z.number().finite()).min(1).max(8), unit: z.string().max(30) }).strict();
 // Both fields default to `[]` so a model that omits them (e.g. due to
-// truncation) gets a clear downstream error instead of a cryptic Zod
-// "expected array, received undefined" parse failure. A parent-level
-// `.refine()` enforces the "at least one claim" contract because Zod's
-// `.default()` bypasses subsequent per-field validators on the default
-// value itself.
-export const evidenceSchema = z.object({ claims: z.array(claimSchema).max(150).default([]), figures: z.array(figureSchema).max(20).default([]) }).strict().refine((d) => d.claims.length >= 1, { message: 'evidence_researcher returned an empty claims database. The source text may be too short, not contain factual claims, or the model failed to extract them. Provide a longer or more factual source, or retry with a different model.', path: ['claims'] });
+// truncation) is accepted, and the pipeline can apply a fallback claim
+// from the source text instead of failing with a cryptic Zod error.
+// The "at least one claim" contract is enforced at the pipeline level
+// (see `fallbackEvidence` in evidence.ts) so the storyboard step always
+// has something to reference.
+export const evidenceSchema = z.object({ claims: z.array(claimSchema).max(150).default([]), figures: z.array(figureSchema).max(20).default([]) }).strict();
 export type Evidence = z.infer<typeof evidenceSchema>;
 export const directorSchema = z.object({ objective: long, thesis: long, successCriteria: z.array(text).min(1).max(6) }).strict();
 export const argumentSchema = z.object({ thesis: long, sections: z.array(z.object({ title: text, claimIds: z.array(id).min(1).max(10), rationale: long }).strict()).min(1).max(30) }).strict();

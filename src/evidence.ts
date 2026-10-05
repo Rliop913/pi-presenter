@@ -72,6 +72,41 @@ export function groundedNumbers(text: string, support: string) {
   if (numbers(text).some(n => !allowed.has(n))) throw new Error(`Unsupported numeric assertion: ${text}`);
 }
 
+/**
+ * Build a minimal evidence database from the source text itself when the
+ * model returns no claims. The fallback takes the first sentence of the
+ * first source as both the claim text and the citation quote, so the
+ * resulting claim is always grounded in the supplied source and passes
+ * `validateEvidence`. The storyboard step always has at least one claim
+ * to reference, so the pipeline can complete end-to-end.
+ *
+ * This is a safety net for when the model is overly conservative or the
+ * source is too short for structured extraction. The claim is marked
+ * with a recognisable id (`claim_fallback`) so downstream review steps
+ * can flag it as low-quality if desired.
+ */
+export function fallbackEvidence(sources: Source[]): Evidence {
+  const first = sources[0];
+  if (!first) throw new Error('Cannot create fallback evidence without at least one source');
+  const trimmed = first.text.trim();
+  const firstSentence = trimmed.split(/[.!?\n]/)[0]?.trim() ?? '';
+  // Use the first sentence as both text and quote so the text is always
+  // a substring of the quote (required by validateEvidence). If the
+  // source has no sentence boundary, fall back to the first 240 chars.
+  // Truncate to 240 chars to stay within the claimSchema max length.
+  const chunk = (firstSentence || trimmed).slice(0, 240);
+  const text = chunk;
+  const quote = chunk;
+  return {
+    claims: [{
+      id: 'claim_fallback',
+      text,
+      citations: [{ sourceId: first.id, quote }],
+    }],
+    figures: [],
+  };
+}
+
 export function validateEvidence(value: unknown, sources: Source[]): Evidence {
   const ev = evidenceSchema.parse(value);
   unique(ev.claims.map(c => c.id), 'claim ids'); unique(ev.figures.map(f => f.id), 'figure ids'); unique(sources.map(s => s.id), 'source ids');

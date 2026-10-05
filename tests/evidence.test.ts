@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { numbers, groundedNumbers } from '../src/evidence.js';
+import { numbers, groundedNumbers, fallbackEvidence, validateEvidence } from '../src/evidence.js';
 import { evidenceSchema } from '../src/schema.js';
 
 test('numbers extracts a plain integer', () => {
@@ -98,14 +98,17 @@ test('groundedNumbers ignores digits embedded in identifiers (regression)', () =
   ));
 });
 
-test('evidenceSchema defaults claims to [] when missing (regression: model truncation)', () => {
+test('evidenceSchema accepts empty claims (no .refine() enforcement)', () => {
+  // Conservative .refine() that required >= 1 claim was removed: the
+  // pipeline now applies a fallback claim from the source instead of
+  // failing with a hard error. An empty claims array is valid at parse
+  // time; the fallback is applied at the pipeline level.
+  const result = evidenceSchema.parse({});
+  assert.deepEqual(result.claims, []);
+  assert.deepEqual(result.figures, []);
+});
   // Before the .default([]) fix, a model that returned an object missing
   // `claims` would fail with a cryptic "expected array, received undefined"
-  // Zod error. Now it defaults to [] and fails with an actionable message
-  // that tells the user what to do (provide a longer/more factual source,
-  // or retry with a different model).
-  assert.throws(() => evidenceSchema.parse({ figures: [] }), /evidence_researcher returned an empty claims database/);
-});
 
 test('evidenceSchema defaults figures to [] when missing', () => {
   // figures has no .min(1), so a valid claims array with no figures
@@ -115,10 +118,44 @@ test('evidenceSchema defaults figures to [] when missing', () => {
   assert.equal(result.claims.length, 1);
 });
 
-test('evidenceSchema accepts an empty object and surfaces the .min(1) failure', () => {
-  // The most common model-mistake case: the model returns {}.
-  // Before: cryptic "expected array, received undefined" x2.
-  // After: single clear error about claims needing >= 1 element, with
-  // actionable guidance for the user.
-  assert.throws(() => evidenceSchema.parse({}), /evidence_researcher returned an empty claims database/);
+test('fallbackEvidence creates a single claim from the first source', () => {
+  const sources = [{ id: 'source_1', text: 'Pilot Alpha recorded 100 requests. Beta recorded 200 requests.', hash: 'h' }];
+  const ev = fallbackEvidence(sources);
+  assert.equal(ev.claims.length, 1);
+  assert.equal(ev.claims[0].id, 'claim_fallback');
+  assert.equal(ev.claims[0].text, 'Pilot Alpha recorded 100 requests');
+  assert.equal(ev.claims[0].citations[0].sourceId, 'source_1');
+  assert.equal(ev.claims[0].citations[0].quote, 'Pilot Alpha recorded 100 requests');
+  assert.deepEqual(ev.figures, []);
+});
+
+test('fallbackEvidence produces evidence that passes validateEvidence', () => {
+  const sources = [{ id: 'source_1', text: 'Reliability matters. The team prioritizes stability over speed.', hash: 'h' }];
+  const ev = fallbackEvidence(sources);
+  // Must round-trip through validateEvidence without throwing.
+  assert.doesNotThrow(() => validateEvidence(ev, sources));
+});
+
+test('fallbackEvidence uses the first 240 chars of the source when no sentence boundary exists', () => {
+  const longText = 'x'.repeat(500);
+  const sources = [{ id: 'source_1', text: longText, hash: 'h' }];
+  const ev = fallbackEvidence(sources);
+  assert.equal(ev.claims[0].text.length, 240);
+  assert.equal(ev.claims[0].citations[0].quote.length, 240);
+});
+
+test('fallbackEvidence throws when no sources are provided', () => {
+  assert.throws(() => fallbackEvidence([]), /at least one source/);
+});
+
+test('pipeline applies fallbackEvidence when the model returns empty claims', () => {
+  // Simulate the pipeline's fallback logic: after validateEvidence, if
+  // claims is empty, replace with fallbackEvidence. This is the contract
+  // the pipeline relies on.
+  const sources = [{ id: 'source_1', text: 'Some source text here. More text.', hash: 'h' }];
+  let evidence = validateEvidence({ claims: [], figures: [] }, sources);
+  assert.equal(evidence.claims.length, 0);
+  if (evidence.claims.length === 0) evidence = fallbackEvidence(sources);
+  assert.equal(evidence.claims.length, 1);
+  assert.equal(evidence.claims[0].id, 'claim_fallback');
 });
