@@ -30,7 +30,7 @@ test('zero model/research/compiler execution preapproval across public commands 
 function awaitPath(cwd: string, rel: string) { return path.join(cwd, '.presentation', rel); }
 test('every contract wizard cancellation position leaves zero execution', async t => {
   const f = await fixture(false); t.after(f.cleanup);
-  const responses = ['', 'source text 1', ''];
+  const responses = ['', ''];
   for (let cancel = 0; cancel < responses.length; cancel++) {
     let i = 0;
     const ui = { ...cancelledUI, input: async () => { const n = i++; return n === cancel ? undefined : responses[n]; } };
@@ -207,8 +207,12 @@ test('one operation lock protects disk and releases on errors', async t => {
 });
 test('source size and total limits fail closed', async t => {
   const f = await fixture(); t.after(f.cleanup);
+  // Per-source 300000 char limit: still rejected at schema level.
   await assert.rejects(f.store.define({ ...contract, sources: ['x'.repeat(300001)] }), /Too big|300000/);
-  await assert.rejects(f.store.define({ ...contract, sources: [] }), /at least 1|Too small/);
+  // Empty sources is now valid (the wizard can submit only a description;
+  // the ingest step uses the description as a single source).
+  await f.store.define({ ...contract, sources: [] });
+  // Total 500000 char limit: enforced at ingest time, not schema time.
   const a = 'a'.repeat(300000); const b = 'b'.repeat(300000);
   await f.store.define({ ...contract, sources: [a, b] }); await f.store.configure(agents); await f.store.approve(await f.store.fingerprint(), 'Approve & Start');
   await assert.rejects(() => ingest(f.store, { ...contract, sources: [a, b] }), /500000 characters/);

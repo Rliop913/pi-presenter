@@ -8,10 +8,23 @@ const long = z.string().trim().min(1).max(2000);
 const id = z.string().regex(/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/);
 const sha = z.string().regex(/^[a-f0-9]{64}$/);
 const sourceText = z.string().trim().min(1).max(300000);
+// Every field has a sensible default so the contract can be created
+// from a single natural-language description (or even an empty input).
+// The skill drives the conversation in natural language; the schema
+// is the final validation, not an input form.
 export const contractSchema = z.object({
-  title: text, purpose: long, audience: text, durationMinutes: z.number().int().min(1).max(180),
-  slideCount: z.number().int().min(1).max(30), sources: z.array(sourceText).min(1).max(20),
-  output: z.string().min(1).max(512), requirements: long,
+  // The user's freeform description captured by the wizard. This is
+  // the primary input; all structured fields below are defaults that
+  // the director model can refine after approval.
+  description: z.string().trim().max(300000).default(''),
+  title: z.string().trim().min(1).max(180).default('Untitled Presentation'),
+  purpose: z.string().trim().min(1).max(2000).default('As described in the presentation brief'),
+  audience: z.string().trim().min(1).max(180).default('General audience'),
+  durationMinutes: z.number().int().min(1).max(180).default(10),
+  slideCount: z.number().int().min(1).max(30).default(5),
+  sources: z.array(z.string().trim().min(1).max(300000)).max(20).default([]),
+  output: z.string().min(1).max(512).default('presentation.pptx'),
+  requirements: z.string().trim().min(1).max(2000).default('As described'),
   maxRevisions: z.number().int().min(0).max(3).default(2),
 }).strict();
 export type Contract = z.infer<typeof contractSchema>;

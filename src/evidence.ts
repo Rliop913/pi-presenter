@@ -30,14 +30,26 @@ export function imageMime(data: Uint8Array): 'image/png' | 'image/jpeg' {
  * is just the literal text. Per-source and total character limits are
  * re-checked here as a defense-in-depth gate against a tampered config.
  */
+/**
+ * Ingest the approved contract into source records. If the user provided
+ * no explicit sources but the contract has a freeform description, the
+ * description is used as a single source so the evidence researcher
+ * always has grounded material to work with. The per-source 300000 char
+ * limit and the 500000 total char limit are enforced here as
+ * defense-in-depth against a tampered config.
+ */
 export async function ingest(store: import('./storage.js').Store, contract: Contract, signal?: AbortSignal): Promise<Source[]> {
   await store.gate(); signal?.throwIfAborted();
   if (canonical(contract) !== canonical((await store.inputs()).contract)) throw new Error('Ingestion contract differs from approved inputs');
+  const rawSources = contract.sources.length > 0
+    ? contract.sources
+    : (contract.description.trim() ? [contract.description] : []);
+  if (rawSources.length === 0) throw new Error('Contract has no source content. Provide a description or paste source text in the wizard.');
   let textTotal = 0;
   const sources: Source[] = [];
-  for (let i = 0; i < contract.sources.length; i++) {
+  for (let i = 0; i < rawSources.length; i++) {
     signal?.throwIfAborted();
-    const text = contract.sources[i];
+    const text = rawSources[i];
     if (!text.trim()) throw new Error(`Source ${i + 1} is empty`);
     if (text.length > 300000) throw new Error(`Source ${i + 1} exceeds 300000 characters`);
     textTotal += text.length;
@@ -51,7 +63,6 @@ export function unique(ids: string[], label: string) {
   if (new Set(ids).size !== ids.length) throw new Error(`Duplicate ${label}`);
 }
 
-/** Conservative numeric gate: exact lexical numbers, no derived arithmetic or invented metrics. */
 /**
  * Conservative numeric gate: exact lexical numbers, no derived arithmetic
  * or invented metrics. The lookbehind/lookahead require a non-word,
