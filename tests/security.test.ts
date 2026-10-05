@@ -4,14 +4,14 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { Store, atomicWrite, safePath } from '../src/storage.js';
-import { Dispatcher } from '../src/dispatch.js';
+import { Dispatcher, type DispatchEvent } from '../src/dispatch.js';
 import { Pipeline } from '../src/pipeline.js';
 import { compile } from '../src/compiler.js';
 import { ingest, validateEvidence, validateStoryboard, validateDeck, applyPatch } from '../src/evidence.js';
 import { validateAgents } from '../src/models.js';
 import { contractWizard, agentsWizard, approvalDialog, type DialogUI } from '../src/wizard.js';
 import { presenterCommand } from '../src/index.js';
-import { directorSchema } from '../src/schema.js';
+import { directorSchema, evidenceSchema } from '../src/schema.js';
 import { agents, board, contract, deck, design, evidence, fixture, MockRegistry, MockPipeline } from './fixtures.js';
 
 const cancelledUI: DialogUI = { input: async () => undefined, select: async () => undefined, notify: () => {} };
@@ -30,7 +30,7 @@ test('zero model/research/compiler execution preapproval across public commands 
 function awaitPath(cwd: string, rel: string) { return path.join(cwd, '.presentation', rel); }
 test('every contract wizard cancellation position leaves zero execution', async t => {
   const f = await fixture(false); t.after(f.cleanup);
-  const responses = ['Title', 'Purpose', 'Audience', '10', '2', 'source.md', 'deck.pptx', 'Editable'];
+  const responses = ['', 'source text 1', ''];
   for (let cancel = 0; cancel < responses.length; cancel++) {
     let i = 0;
     const ui = { ...cancelledUI, input: async () => { const n = i++; return n === cancel ? undefined : responses[n]; } };
@@ -109,6 +109,92 @@ test('dispatch cancellation bounds even a provider ignoring abort; checkpoint re
   assert.equal(f.store.checkpoint.trace[0].outcome, 'error');
   f.registry.hang = false; await f.store.gate();
   await new Dispatcher(f.store).call('director', 'Refine', directorSchema, {});
+});
+test('dispatch notifier receives start and success events with role, timing, and usage', async t => {
+  const f = await fixture(); t.after(f.cleanup);
+  const events: DispatchEvent[] = [];
+  const dispatcher = new Dispatcher(f.store, undefined, (e) => events.push(e));
+  await dispatcher.call('director', 'Refine user contract', directorSchema, { contract });
+  assert.equal(events.length, 2);
+  assert.equal(events[0].kind, 'start');
+  assert.equal(events[1].kind, 'success');
+  const start = events[0] as Extract<DispatchEvent, { kind: 'start' }>;
+  assert.equal(start.role, 'director');
+  assert.equal(start.callIndex, 1);
+  assert.equal(start.callBudget, 180);
+  assert.equal(start.provider, 'mock-provider');
+  assert.equal(start.model, 'mock-exact');
+  assert.equal(start.effort, 'medium');
+  assert.equal(start.task, 'Refine user contract');
+  assert.equal(start.hasImages, false);
+  const success = events[1] as Extract<DispatchEvent, { kind: 'success' }>;
+  assert.equal(success.role, 'director');
+  assert.equal(success.callIndex, 1);
+  assert.equal(success.callBudget, 180);
+  assert.equal(success.durationMs >= 0, true);
+  assert.equal(success.inputTokens, 12);
+  assert.equal(success.outputTokens, 20);
+});
+test('dispatch notifier receives error event with role, duration, and error message', async t => {
+  const f = await fixture(); t.after(f.cleanup);
+  const events: DispatchEvent[] = [];
+  f.registry.malformed = true;
+  const dispatcher = new Dispatcher(f.store, undefined, (e) => events.push(e));
+  await assert.rejects(() => dispatcher.call('director', 'Refine user contract', directorSchema, { contract }), /strict JSON/);
+  assert.equal(events.length, 2);
+  assert.equal(events[0].kind, 'start');
+  assert.equal(events[1].kind, 'error');
+  const error = events[1] as Extract<DispatchEvent, { kind: 'error' }>;
+  assert.equal(error.role, 'director');
+  assert.equal(error.callIndex, 1);
+  assert.equal(error.callBudget, 180);
+  assert.equal(error.durationMs >= 0, true);
+  assert.ok(error.error.includes('strict JSON'));
+});
+test('dispatch notifier counts each call against the budget', async t => {
+  const f = await fixture(); t.after(f.cleanup);
+  const events: DispatchEvent[] = [];
+  const dispatcher = new Dispatcher(f.store, undefined, (e) => events.push(e));
+  await dispatcher.call('director', 'Refine user contract', directorSchema, { contract });
+  await dispatcher.call('evidence_researcher', 'Extract claim database', evidenceSchema, { contract, sources: f.sources });
+  const startEvents = events.filter((e) => e.kind === 'start') as Extract<DispatchEvent, { kind: 'start' }>[];
+  assert.equal(startEvents.length, 2);
+  assert.equal(startEvents[0].callIndex, 1);
+  assert.equal(startEvents[1].callIndex, 2);
+  assert.equal(startEvents[0].callBudget, 180);
+  assert.equal(startEvents[1].callBudget, 180);
+});
+test('dispatch notifier failure is non-fatal: the model call still completes', async t => {
+  const f = await fixture(); t.after(f.cleanup);
+  const dispatcher = new Dispatcher(f.store, undefined, () => { throw new Error('notifier is broken'); });
+  const result = await dispatcher.call('director', 'Refine user contract', directorSchema, { contract });
+  assert.ok(result);
+  assert.equal(f.store.checkpoint.trace[0].outcome, 'validated');
+});
+test('dispatcher accepts markdown-fenced JSON output without failing the call', async t => {
+  const f = await fixture(); t.after(f.cleanup);
+  f.registry.fenced = true;
+  const dispatcher = new Dispatcher(f.store);
+  const result = await dispatcher.call('director', 'Refine user contract', directorSchema, { contract });
+  assert.equal(result.objective, 'Explain the pilot');
+  assert.equal(f.store.checkpoint.trace[0].outcome, 'validated');
+});
+test('dispatcher accepts prose-wrapped JSON output without failing the call', async t => {
+  const f = await fixture(); t.after(f.cleanup);
+  f.registry.proseWrapped = true;
+  const dispatcher = new Dispatcher(f.store);
+  const result = await dispatcher.call('director', 'Refine user contract', directorSchema, { contract });
+  assert.equal(result.objective, 'Explain the pilot');
+  assert.equal(result.thesis, 'Reliability matters');
+  assert.equal(f.store.checkpoint.trace[0].outcome, 'validated');
+});
+test('dispatcher still fails closed when fenced content is not valid JSON', async t => {
+  const f = await fixture(); t.after(f.cleanup);
+  f.registry.fenced = true;
+  f.registry.malformed = true;
+  const dispatcher = new Dispatcher(f.store);
+  await assert.rejects(() => dispatcher.call('director', 'Refine user contract', directorSchema, { contract }), /strict JSON/);
+  assert.equal(f.store.checkpoint.trace[0].outcome, 'error');
 });
 test('one operation lock protects disk and releases on errors', async t => {
   const f = await fixture(); t.after(f.cleanup);

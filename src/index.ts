@@ -15,7 +15,22 @@ export async function presenterCommand(args: string, ctx: CommandContext) {
   await store.exclusive(async () => {
     const controller = new AbortController(); active.set(ctx.cwd, controller);
     const signal = ctx.signal ? AbortSignal.any([ctx.signal, controller.signal]) : controller.signal;
-    const pipeline = new Pipeline(store, signal);
+    const pipeline = new Pipeline(store, signal, (event) => {
+      const idx = `[${event.callIndex}/${event.callBudget}]`;
+      if (event.kind === 'start') {
+        const task = event.task.length > 80 ? event.task.slice(0, 80) + '…' : event.task;
+        const img = event.hasImages ? ' +image' : '';
+        ctx.ui.notify(`${idx} ${event.role} (${event.provider}/${event.model}, effort=${event.effort})${img} — ${task}`, 'info');
+      } else if (event.kind === 'success') {
+        const dur = (event.durationMs / 1000).toFixed(1);
+        const tok = event.inputTokens !== undefined ? `, ${event.inputTokens}→${event.outputTokens ?? '?'} tokens` : '';
+        ctx.ui.notify(`${idx} ${event.role} ✓ in ${dur}s${tok}`, 'info');
+      } else {
+        const dur = (event.durationMs / 1000).toFixed(1);
+        const err = event.error.length > 120 ? event.error.slice(0, 120) + '…' : event.error;
+        ctx.ui.notify(`${idx} ${event.role} ✗ in ${dur}s: ${err}`, 'error');
+      }
+    });
     const ui: DialogUI = {
       input: (title, placeholder) => ctx.ui.input(title, placeholder, { signal }),
       select: (title, options) => ctx.ui.select(title, options, { signal }),

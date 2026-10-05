@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import path from 'node:path';
 import { Store, atomicWrite, boundedRead, canonical, digest, inside } from './storage.js';
-import { Dispatcher } from './dispatch.js';
+import { Dispatcher, type DispatchNotifier } from './dispatch.js';
 import { compile } from './compiler.js';
 import { render, validateRenders } from './renderer.js';
 import { ingest, validateEvidence, validateStoryboard, validateDeck, refs, unique, applyPatch, imageMime } from './evidence.js';
@@ -10,7 +10,7 @@ import { acceptanceSchema, argumentSchema, deckSchema, designSchema, directorSch
 const reviewedSchema = z.object({ binding: z.string(), result: reviewSchema }).strict();
 export class Pipeline {
   readonly dispatch: Dispatcher;
-  constructor(readonly store: Store, readonly signal?: AbortSignal) { this.dispatch = new Dispatcher(store, signal); }
+  constructor(readonly store: Store, readonly signal?: AbortSignal, notify?: DispatchNotifier) { this.dispatch = new Dispatcher(store, signal, notify); }
   protected async renderDeck(slides: { id: string }[]) { return render(this.store, slides, this.signal); }
   async cached<T>(file: string, schema: z.ZodType<T>, make: () => Promise<T>): Promise<T> {
     if (this.store.checkpoint.artifacts[file]) return this.store.read(file, schema);

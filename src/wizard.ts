@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai';
-import { contractSchema, roles, type Contract, type Agents } from './schema.js';
+import { roles, type Contract, type Agents } from './schema.js';
 import { presets, presetEfforts, validateAgents } from './models.js';
 import { Store } from './storage.js';
 
@@ -31,14 +31,6 @@ const textField = (max: number) => (raw: string) => {
   return v;
 };
 
-const integerField = (min: number, max: number, label: string) => (raw: string) => {
-  const v = raw.trim();
-  if (!v) throw new Error('Required');
-  if (!/^-?\d+$/.test(v)) throw new Error(`${label} must be an integer`);
-  const n = Number(v);
-  if (!Number.isInteger(n) || n < min || n > max) throw new Error(`${label} must be an integer between ${min} and ${max}`);
-  return n;
-};
 
 const sourceChunkField = () => (raw: string): string | null => {
   const v = raw.trim();
@@ -88,17 +80,135 @@ async function askSources(ui: DialogUI): Promise<string[] | undefined> {
   return sources;
 }
 
+/**
+ * Recognized field keys in a freeform brief. Matches case-insensitively
+ * and tolerates a leading `- ` or `* ` bullet, an optional colon, and
+ * trailing whitespace. Anything else in the brief is treated as freeform
+ * context and ignored by the local parser.
+ */
+const BRIEF_KEYS = ['title', 'purpose', 'audience', 'duration', 'slides', 'output', 'requirements'] as const;
+type BriefKey = typeof BRIEF_KEYS[number];
+
+/**
+ * Extract structured fields from a multi-line brief. Supports both
+ * structured format (`Title: ...`) and YAML-like format (`title: ...`).
+ * Lines that do not match a known key are ignored. Missing fields are
+ * simply absent from the result; the caller is responsible for prompting
+ * the user for anything that was not provided.
+ */
+export function parseBrief(text: string): Partial<Record<BriefKey, string | number>> {
+  const out: Partial<Record<BriefKey, string | number>> = {};
+  if (typeof text !== 'string' || !text.trim()) return out;
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.replace(/^\s*[-*]\s+/, '').trim();
+    if (!line) continue;
+    const m = line.match(/^(title|purpose|audience|duration|slides|output|requirements)\s*:\s*(.+)$/i);
+    if (!m) continue;
+    const key = m[1].toLowerCase() as BriefKey;
+    const value = m[2].trim();
+    if (!value) continue;
+    if (key === 'duration' || key === 'slides') {
+      const cleaned = value.replace(/[^0-9-]/g, '');
+      if (!cleaned) continue;
+      const n = Number(cleaned);
+      if (Number.isInteger(n) && n >= 0) out[key] = n;
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+const BRIEF_PLACEHOLDER = `Paste your brief in any format. Recognized lines (case-insensitive, one per line):
+  Title: <your title>
+  Purpose: <desired audience action>
+  Audience: <who will see this>
+  Duration: <number> minutes
+  Slides: <number>
+  Output: <project-relative path ending in .pptx>
+  Requirements: <constraints>
+
+Example:
+  Title: Q4 Review
+  Purpose: Show progress to the board
+  Audience: Executive team
+  Duration: 15 minutes
+  Slides: 8
+  Output: presentation.pptx
+  Requirements: Match brand colors, include Q4 highlights
+
+All fields are optional. Leave the brief empty to use sensible defaults (the director will refine the contract after approval).`;
+
+/**
+ * Sensible defaults for every contract field. The director refines these
+ * after approval, so the user only has to provide a brief and sources.
+ */
+export function defaultContract(sources: string[]): Omit<Contract, 'maxRevisions'> {
+  const firstSource = sources.find((s) => s.trim().length > 0) ?? '';
+  const firstSentence = firstSource.split(/[.!?\n]/)[0]?.trim() ?? '';
+  const title = firstSentence.length > 180 ? firstSentence.slice(0, 180).trimEnd() : (firstSentence || 'Untitled Presentation');
+  const slideCount = Math.min(20, Math.max(3, sources.length * 2 + 1));
+  return {
+    title,
+    purpose: 'Explain the topic to the audience using the supplied sources.',
+    audience: 'General audience',
+    durationMinutes: 10,
+    slideCount,
+    sources,
+    output: 'presentation.pptx',
+    requirements: 'Editable widescreen slides, grounded in supplied sources.',
+  };
+}
+
+/**
+ * Apply a string validator to a parsed brief value; fall back to a default
+ * if the value is missing or fails validation. This lets the user paste
+ * partially-valid briefs without the wizard aborting.
+ */
+function pickValid(value: string | number | undefined, validate: (raw: string) => string, fallback: string): string {
+  if (typeof value !== 'string') return fallback;
+  try { return validate(value); } catch { return fallback; }
+}
+
+function pickInt(value: string | number | undefined, min: number, max: number, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) return fallback;
+  return value;
+}
+
+/**
+ * Merge a parsed brief with defaults and the user-supplied sources.
+ * Invalid brief values silently fall back to the corresponding default.
+ */
+export function mergeBrief(parsed: Partial<Record<BriefKey, string | number>>, sources: string[], prior?: Contract): Contract {
+  const d = defaultContract(sources);
+  return {
+    title: pickValid(parsed.title, textField(180), d.title),
+    purpose: pickValid(parsed.purpose, textField(2000), d.purpose),
+    audience: pickValid(parsed.audience, textField(180), d.audience),
+    durationMinutes: pickInt(parsed.duration, 1, 180, d.durationMinutes),
+    slideCount: pickInt(parsed.slides, 1, 30, d.slideCount),
+    sources,
+    output: pickValid(parsed.output, outputField, d.output),
+    requirements: pickValid(parsed.requirements, textField(2000), d.requirements),
+    maxRevisions: prior?.maxRevisions ?? 2,
+  };
+}
+
 export async function contractWizard(ui: DialogUI, prior?: Contract): Promise<Contract | undefined> {
-  const title = await ask(ui, 'Presentation title', textField(180), prior?.title); if (title === undefined) return undefined;
-  const purpose = await ask(ui, 'Purpose / desired audience action', textField(2000), prior?.purpose); if (purpose === undefined) return undefined;
-  const audience = await ask(ui, 'Audience', textField(180), prior?.audience); if (audience === undefined) return undefined;
-  const durationMinutes = await ask(ui, 'Duration in minutes (1-180)', integerField(1, 180, 'Duration'), prior ? String(prior.durationMinutes) : '10'); if (durationMinutes === undefined) return undefined;
-  const slideCount = await ask(ui, 'Slide count (1-30)', integerField(1, 30, 'Slide count'), prior ? String(prior.slideCount) : '8'); if (slideCount === undefined) return undefined;
-  const sources = await askSources(ui); if (sources === undefined) return undefined;
-  const output = await ask(ui, 'Project-relative export path (must end in .pptx, outside .presentation)', outputField, prior?.output ?? 'presentation.pptx'); if (output === undefined) return undefined;
-  const requirements = await ask(ui, 'Output requirements / constraints', textField(2000), prior?.requirements ?? 'Editable widescreen slides, grounded in supplied sources.'); if (requirements === undefined) return undefined;
-  const maxRevisions = prior?.maxRevisions ?? 2;
-  return contractSchema.parse({ title, purpose, audience, durationMinutes, slideCount, sources, output, requirements, maxRevisions });
+  // Step 1: one optional text input for the whole brief. Empty submission
+  // is allowed; the user can paste structured fields, prose, or nothing.
+  const brief = await ui.input('Brief (optional; paste fields or prose; leave empty for defaults)', BRIEF_PLACEHOLDER);
+  if (brief === undefined) return undefined;
+  const parsed = parseBrief(brief);
+
+  // Step 2: collect sources (at least one required).
+  const sources = await askSources(ui);
+  if (sources === undefined) return undefined;
+
+  // Step 3: merge parsed brief with defaults and validate. Invalid brief
+  // values silently fall back to defaults; the approval dialog will show
+  // the final contract for review.
+  return mergeBrief(parsed, sources, prior);
 }
 
 export async function agentsWizard(ui: DialogUI, store: Store): Promise<Agents | undefined> {

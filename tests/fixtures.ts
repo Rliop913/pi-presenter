@@ -26,6 +26,8 @@ export class MockRegistry implements Registry {
   failVisual = 0;
   alwaysFailVisual = false;
   malformed = false;
+  fenced = false;
+  proseWrapped = false;
   substituted = false;
   clamped = false;
   hang = false;
@@ -42,7 +44,12 @@ export class MockRegistry implements Registry {
     let payload: Record<string, unknown>;
     try { payload = JSON.parse(payloadText); } catch { throw new Error('Bad mock input'); }
     const value = this.responseOverride?.(system, payload) ?? this.response(system, payload);
-    stream.end({ role: 'assistant', api: m.api, provider: m.provider, model: this.substituted ? 'fallback' : m.id, thinkingLevel: this.clamped ? 'low' : undefined, providerThinkingLevel: this.clamped ? 'native-low' : undefined, content: [{ type: 'text', text: this.malformed ? 'not JSON' : JSON.stringify(value) }], usage, stopReason: 'stop', timestamp: Date.now() });
+    const serialized = this.malformed ? 'not JSON' : JSON.stringify(value);
+    let wrapped = serialized;
+    if (!this.malformed && this.fenced) wrapped = `\`\`\`json\n${serialized}\n\`\`\``;
+    else if (!this.malformed && this.proseWrapped) wrapped = `Sure! Here is the result:\n${serialized}\nLet me know if you need changes!`;
+    else if (!this.malformed && this.proseWrapped) wrapped = 'Sure! Here is the result:\n' + serialized + '\nLet me know if you need changes!';
+    stream.end({ role: 'assistant', api: m.api, provider: m.provider, model: this.substituted ? 'fallback' : m.id, thinkingLevel: this.clamped ? 'low' : undefined, providerThinkingLevel: this.clamped ? 'native-low' : undefined, content: [{ type: 'text', text: wrapped }], usage, stopReason: 'stop', timestamp: Date.now() });
     return stream;
   }
   response(system: string, payload: Record<string, unknown>): unknown {

@@ -70,7 +70,18 @@ UNINITIALIZED → PRESENTATION_DEFINED → AGENTS_CONFIGURED → AWAITING_APPROV
                                                    +--------+ bounded revision
 ```
 
-The workflow owns isolated provider calls: fresh system/user messages, no parent conversation, no agent tools, no arbitrary executable commands from models. Calls are sequential and bounded (180 calls, 180 seconds/call, 12k maximum output tokens, strict output schemas and payload bounds). Actual provider-native effort mapping remains the host's responsibility. Requested exact effort, role/model, task, timestamps, usage and outcomes are recorded in the checkpoint trace; command-owned usage is not added to the parent conversation's token totals.
+The workflow owns isolated provider calls: fresh system/user messages, no parent conversation, no agent tools, no arbitrary executable commands from models. Calls are sequential and bounded (180 calls, 180 seconds/call, 12k maximum output tokens, strict output schemas and payload bounds). Actual provider-native effort mapping remains the host's responsibility. Requested exact effort, role/model, task, timestamps, usage and outcomes are recorded in the checkpoint trace; command-owned usage is not billable.
+
+Every isolated call fires a `DispatchEvent` to the host (`start` / `success` / `error`) with role, call index, call budget, provider/model/effort, task preview, elapsed time and token usage. The extension forwards these as `ctx.ui.notify` messages so a long pipeline is visible in real time:
+
+```text
+[1/180] director (mock-provider/mock-exact, effort=medium) — Refine the user contract into an objective, …
+[1/180] director ✓ in 2.4s, 12→20 tokens
+[2/180] evidence_researcher (mock-provider/mock-exact, effort=low) — Extract an evidence claim database …
+[2/180] evidence_researcher ✓ in 3.1s, 18→42 tokens
+[3/180] narrative_architect (mock-provider/mock-exact, effort=high) — Create a logical argument map …
+[3/180] narrative_architect ✗ in 1.8s: Model must return strict JSON, no Markdown fences
+```
 
 ```text
 .presentation/
