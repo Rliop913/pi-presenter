@@ -1,0 +1,12 @@
+# Illustrative contract only. Use /presenter new; this file grants no approval.
+title: Fictional pilot briefing
+purpose: Explain the pilot evidence and recommend a review before expansion.
+audience: Pilot team
+durationMinutes: 5
+slideCount: 3
+sources:
+  - examples/source.md
+output: pilot-briefing.pptx
+requirements: >-
+  Editable widescreen slides. Mark all data as fictional. Cite every claim.
+maxRevisions: 2

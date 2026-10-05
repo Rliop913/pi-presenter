@@ -1,0 +1,51 @@
+{
+  "name": "@rliop/pi-presenter",
+  "version": "0.1.0",
+  "description": "Approval-gated, evidence-grounded presentation production for Pi",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "presentation",
+    "pptx"
+  ],
+  "files": [
+    "src",
+    "skills",
+    "examples",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ],
+    "skills": [
+      "./skills/presenter"
+    ]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "pptxgenjs": "4.0.0",
+    "yaml": "^2.8.1",
+    "zod": "^4.1.12"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@types/node": "^22.19.0",
+    "jszip": "^3.10.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
