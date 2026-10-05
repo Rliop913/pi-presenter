@@ -7,9 +7,10 @@ const text = z.string().trim().min(1).max(180);
 const long = z.string().trim().min(1).max(2000);
 const id = z.string().regex(/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/);
 const sha = z.string().regex(/^[a-f0-9]{64}$/);
+const sourceText = z.string().trim().min(1).max(300000);
 export const contractSchema = z.object({
   title: text, purpose: long, audience: text, durationMinutes: z.number().int().min(1).max(180),
-  slideCount: z.number().int().min(1).max(30), sources: z.array(z.string().min(1).max(512)).min(1).max(20),
+  slideCount: z.number().int().min(1).max(30), sources: z.array(sourceText).min(1).max(20),
   output: z.string().min(1).max(512), requirements: long,
   maxRevisions: z.number().int().min(0).max(3).default(2),
 }).strict();
@@ -18,7 +19,7 @@ export const assignmentSchema = z.object({ provider: text, id: z.string().min(1)
 export type Assignment = z.infer<typeof assignmentSchema>;
 export const agentsSchema = z.object(Object.fromEntries(roles.map(r => [r, assignmentSchema])) as Record<Role, typeof assignmentSchema>).strict();
 export type Agents = z.infer<typeof agentsSchema>;
-export const sourceSchema = z.object({ id, path: z.string(), hash: sha, kind: z.enum(['text', 'image']), text: z.string().max(300000), asset: z.string().optional() }).strict();
+export const sourceSchema = z.object({ id, text: sourceText, hash: sha }).strict();
 export type Source = z.infer<typeof sourceSchema>;
 export const sourcesSchema = z.array(sourceSchema).min(1).max(20);
 const citation = z.object({ sourceId: id, quote: z.string().trim().min(1).max(2000) }).strict();
@@ -33,7 +34,7 @@ export const storyboardSchema = z.object({ slides: z.array(z.object({ id, title:
 export type Storyboard = z.infer<typeof storyboardSchema>;
 export const designSchema = z.object({ font: z.enum(['Aptos', 'Arial', 'Calibri']), background: z.string().regex(/^[A-Fa-f0-9]{6}$/), foreground: z.string().regex(/^[A-Fa-f0-9]{6}$/), accent: z.string().regex(/^[A-Fa-f0-9]{6}$/), titleSize: z.number().min(28).max(36), bodySize: z.number().min(18).max(24) }).strict();
 export type Design = z.infer<typeof designSchema>;
-export const slideSchema = z.object({ id, title: z.string().min(1).max(90), layout: z.enum(['title', 'two-column', 'bullets', 'process', 'chart', 'image']), claimIds: z.array(id).min(1).max(6), figureId: id.optional(), asset: z.string().max(512).optional() }).strict();
+export const slideSchema = z.object({ id, title: z.string().min(1).max(90), layout: z.enum(['title', 'two-column', 'bullets', 'process', 'chart']), claimIds: z.array(id).min(1).max(6), figureId: id.optional() }).strict();
 export const deckSchema = z.object({ slides: z.array(slideSchema).min(1).max(30) }).strict();
 export type Deck = z.infer<typeof deckSchema>;
 export const findingSchema = z.object({ slideId: id, severity: z.enum(['minor', 'major', 'critical']), issue: long, fix: long }).strict();

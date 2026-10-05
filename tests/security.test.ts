@@ -52,7 +52,7 @@ test('approval dialog shows all exact assignments and contract, cancellation can
   const f = await fixture(false); t.after(f.cleanup); let title = '';
   assert.equal(await approvalDialog({ ...cancelledUI, select: async (s) => { title = s; return 'Cancel'; } }, f.store), false);
   for (const role of Object.keys(agents)) assert.ok(title.includes(`${role}: mock-provider/mock-exact | effort=medium`));
-  assert.ok(title.includes('Sources: source.md')); assert.ok(title.includes(contract.purpose));
+  assert.ok(title.includes('freeform chunks')); assert.ok(title.includes('Pilot Alpha recorded 100 requests.')); assert.ok(title.includes(contract.purpose));
   assert.equal(f.store.checkpoint.approval, undefined); assert.equal(f.registry.calls.length, 0);
   await assert.rejects(() => f.store.approve('a'.repeat(64), 'Approve & Start'), /changed/);
   await assert.rejects(() => f.store.approve('a'.repeat(64), 'approve'), /Explicit/);
@@ -67,11 +67,11 @@ test('exact identity, unavailable suggestions, vision and host-supported effort 
   assert.throws(() => validateAgents(registry, agents), /Unsupported effort/);
   assert.equal(registry.calls.length, 0);
 });
-test('raw YAML edits, source edits, model capability changes and approved-matrix tamper invalidate approval', async t => {
+test('raw YAML edits, source-text edits, model capability changes and approved-matrix tamper invalidate approval', async t => {
   for (const mutation of ['yaml', 'source', 'registry', 'matrix', 'effort-map']) {
     const f = await fixture(); t.after(f.cleanup);
     if (mutation === 'yaml') await fs.appendFile(await f.store.file('config/agents.yaml'), '\n# edit');
-    if (mutation === 'source') await fs.appendFile(path.join(f.cwd, 'source.md'), ' changed');
+    if (mutation === 'source') await fs.appendFile(await f.store.file('config/presentation.yaml'), '\n# edit');
     if (mutation === 'registry') f.registry.available[0].contextWindow++;
     if (mutation === 'effort-map') f.registry.available[0].thinkingLevelMap!.medium = 'native-effort-changed';
     if (mutation === 'matrix') f.store.checkpoint.approval!.matrix.director.effort = 'low';
@@ -119,17 +119,15 @@ test('one operation lock protects disk and releases on errors', async t => {
   await assert.rejects(() => f.store.exclusive(async () => { throw new Error('oops'); }), /oops/);
   await f.store.exclusive(async () => {});
 });
-test('path and ingestion size/root/extension limits fail closed', async t => {
+test('source size and total limits fail closed', async t => {
   const f = await fixture(); t.after(f.cleanup);
-  await assert.rejects(() => safePath(f.cwd, '../escape'), /escapes/);
-  await assert.rejects(() => safePath(f.cwd, path.resolve(f.cwd, 'source.md')), /relative/);
-  await f.store.define({ ...contract, sources: ['too-big.txt'] });
-  await atomicWrite(path.join(f.cwd, 'too-big.txt'), Buffer.alloc(8 * 1024 * 1024 + 1)); await f.store.configure(agents);
-  await assert.rejects(() => f.store.fingerprint(), /exceeds/);
-  await f.store.define({ ...contract, sources: ['source.bin'] }); await atomicWrite(path.join(f.cwd, 'source.bin'), 'binary'); await f.store.configure(agents); await f.store.approve(await f.store.fingerprint(), 'Approve & Start');
-  await assert.rejects(() => ingest(f.store, { ...contract, sources: ['source.bin'] }), /Unsupported source/);
+  await assert.rejects(f.store.define({ ...contract, sources: ['x'.repeat(300001)] }), /Too big|300000/);
+  await assert.rejects(f.store.define({ ...contract, sources: [] }), /at least 1|Too small/);
+  const a = 'a'.repeat(300000); const b = 'b'.repeat(300000);
+  await f.store.define({ ...contract, sources: [a, b] }); await f.store.configure(agents); await f.store.approve(await f.store.fingerprint(), 'Approve & Start');
+  await assert.rejects(() => ingest(f.store, { ...contract, sources: [a, b] }), /500000 characters/);
 });
-test('claim citations, numeric assertions, storyboard refs, assets and chart references cannot be invented', async t => {
+test('claim citations, numeric assertions, storyboard refs, layouts and chart references cannot be invented', async t => {
   const f = await fixture(); t.after(f.cleanup);
   assert.deepEqual(validateEvidence(evidence, f.sources), evidence);
   const bad = structuredClone(evidence); bad.claims[0].citations[0].quote = 'fabricated'; assert.throws(() => validateEvidence(bad, f.sources), /Invalid citation/);
@@ -140,7 +138,6 @@ test('claim citations, numeric assertions, storyboard refs, assets and chart ref
   assert.throws(() => validateEvidence(chartSwap, f.sources), /association/);
   assert.throws(() => validateStoryboard({ slides: [{ ...board.slides[0], claimIds: ['invented'] }, board.slides[1]] }, evidence, contract), /Unknown claim/);
   assert.throws(() => validateStoryboard({ slides: [{ ...board.slides[0], title: 'Improvement 999%' }, board.slides[1]] }, evidence, contract), /Unsupported numeric/);
-  assert.throws(() => validateDeck({ slides: [{ ...deck.slides[0], layout: 'image', asset: '../../secret.png' }, deck.slides[1]] }, evidence, board, f.sources), /ingested asset/);
   assert.throws(() => validateDeck({ slides: [deck.slides[0], { ...deck.slides[1], layout: 'chart', figureId: 'fake' }] }, evidence, board, f.sources), /provenance/);
 });
 test('targeted patch has exact affected IDs and keeps unaffected slides immutable', () => {

@@ -96,16 +96,9 @@ export class Store {
   }
   async fingerprint() {
     const { contract, agents } = await this.inputs();
-    const sourceHashes = [];
-    let total = 0;
-    for (const source of contract.sources) {
-      if (path.normalize(source).split(path.sep)[0] === '.presentation') throw new Error('Sources cannot be generated presentation artifacts');
-      const data = await boundedRead(await safePath(this.cwd, source)); total += data.length;
-      if (total > 24 * 1024 * 1024) throw new Error('Sources exceed total 24 MiB limit');
-      sourceHashes.push({ path: source, hash: digest(data) });
-    }
-    const output = await safePath(this.cwd, contract.output);
-    if (!output.endsWith('.pptx') || inside(path.resolve(this.cwd, '.presentation'), output)) throw new Error('Export must be a project-relative .pptx outside .presentation');
+    const sourceHashes = contract.sources.map((text, index) => ({ index, hash: digest(text) }));
+    const output = path.resolve(this.cwd, contract.output);
+    if (!contract.output.endsWith('.pptx') || contract.output.includes('\0') || contract.output === '.presentation' || contract.output.startsWith('.presentation/') || contract.output.startsWith('.presentation\\') || inside(path.resolve(this.cwd, '.presentation'), output)) throw new Error('Export must be a project-relative .pptx outside .presentation');
     return digest(canonical({
       presentation: digest(await boundedRead(await this.file('config/presentation.yaml'))),
       agents: digest(await boundedRead(await this.file('config/agents.yaml'))),

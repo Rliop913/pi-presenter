@@ -5,7 +5,10 @@ audience: Pilot team
 durationMinutes: 5
 slideCount: 3
 sources:
-  - examples/source.md
+  - >
+    The pilot team prioritizes reliability over speed.
+    Pilot Alpha recorded 100 requests. Pilot Beta recorded 200 requests.
+    The team recommends reviewing pilot evidence before expanding deployment.
 output: pilot-briefing.pptx
 requirements: >-
   Editable widescreen slides. Mark all data as fictional. Cite every claim.

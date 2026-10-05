@@ -1,7 +1,4 @@
-import path from 'node:path';
-import { z } from 'zod';
-import { Store, atomicWrite, boundedRead, digest, canonical, safePath } from './storage.js';
-import { runCommand, type CommandRunner } from './process.js';
+import { digest, canonical } from './storage.js';
 import { evidenceSchema, deckSchema, storyboardSchema, type Source, type Evidence, type Deck, type Storyboard, type Contract } from './schema.js';
 
 export function imageMime(data: Uint8Array): 'image/png' | 'image/jpeg' {
@@ -26,49 +23,47 @@ export function imageMime(data: Uint8Array): 'image/png' | 'image/jpeg' {
   if (bytes.length > 4 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255 && bytes[bytes.length - 2] === 255 && bytes[bytes.length - 1] === 217) return 'image/jpeg';
   throw new Error('Only structurally validated PNG/JPEG images are supported');
 }
-export async function ingest(store: Store, contract: Contract, signal?: AbortSignal, runner: CommandRunner = runCommand): Promise<Source[]> {
+
+/**
+ * Ingest freeform text sources from the approved contract. No file I/O: the
+ * wizard collected the source content directly from the user, so the source
+ * is just the literal text. Per-source and total character limits are
+ * re-checked here as a defense-in-depth gate against a tampered config.
+ */
+export async function ingest(store: import('./storage.js').Store, contract: Contract, signal?: AbortSignal): Promise<Source[]> {
   await store.gate(); signal?.throwIfAborted();
   if (canonical(contract) !== canonical((await store.inputs()).contract)) throw new Error('Ingestion contract differs from approved inputs');
-  const sources: Source[] = []; let textTotal = 0;
+  let textTotal = 0;
+  const sources: Source[] = [];
   for (let i = 0; i < contract.sources.length; i++) {
     signal?.throwIfAborted();
-    const relative = contract.sources[i]; const file = await safePath(store.cwd, relative);
-    const data = await boundedRead(file); const ext = path.extname(file).toLowerCase();
-    const source: Source = { id: `source_${i + 1}`, path: relative, hash: digest(data), kind: 'text', text: '' };
-    if (['.png', '.jpg', '.jpeg'].includes(ext)) {
-      const mime = imageMime(data); source.kind = 'image';
-      source.asset = `assets/source_${i + 1}.${mime === 'image/png' ? 'png' : 'jpg'}`;
-      await atomicWrite(await store.file(source.asset), data); await store.track(source.asset);
-    } else if (ext === '.pdf') {
-      source.text = await runner('pdftotext', ['-layout', file, '-'], signal);
-    } else if (['.txt', '.md', '.markdown', '.csv', '.json'].includes(ext)) {
-      source.text = new TextDecoder('utf-8', { fatal: true }).decode(data);
-      if (ext === '.json') {
-        try { JSON.parse(source.text); } catch (cause) { throw new Error(`Invalid source JSON: ${relative}`, { cause }); }
-      }
-    } else throw new Error(`Unsupported source extension: ${ext}`);
-    if (source.text.length > 300000) throw new Error(`Extracted source exceeds 300000 characters: ${relative}`);
-    textTotal += source.text.length;
-    if (textTotal > 500000) throw new Error('Total extracted text exceeds 500000 characters');
-    sources.push(source);
+    const text = contract.sources[i];
+    if (!text.trim()) throw new Error(`Source ${i + 1} is empty`);
+    if (text.length > 300000) throw new Error(`Source ${i + 1} exceeds 300000 characters`);
+    textTotal += text.length;
+    if (textTotal > 500000) throw new Error('Total source text exceeds 500000 characters');
+    sources.push({ id: `source_${i + 1}`, text, hash: digest(text) });
   }
   return sources;
 }
+
 export function unique(ids: string[], label: string) {
   if (new Set(ids).size !== ids.length) throw new Error(`Duplicate ${label}`);
 }
+
 /** Conservative numeric gate: exact lexical numbers, no derived arithmetic or invented metrics. */
 export function numbers(text: string): string[] { return text.match(/[-+]?\d+(?:[.,]\d+)*(?:%|\b)/g) ?? []; }
 export function groundedNumbers(text: string, support: string) {
   const allowed = new Set(numbers(support));
   if (numbers(text).some(n => !allowed.has(n))) throw new Error(`Unsupported numeric assertion: ${text}`);
 }
+
 export function validateEvidence(value: unknown, sources: Source[]): Evidence {
   const ev = evidenceSchema.parse(value);
   unique(ev.claims.map(c => c.id), 'claim ids'); unique(ev.figures.map(f => f.id), 'figure ids'); unique(sources.map(s => s.id), 'source ids');
   const quote = (sourceId: string, q: string) => {
     const source = sources.find(s => s.id === sourceId);
-    if (!source || source.kind !== 'text' || !source.text.includes(q)) throw new Error(`Invalid citation/quote for ${sourceId}`);
+    if (!source || !source.text.includes(q)) throw new Error(`Invalid citation/quote for ${sourceId}`);
   };
   for (const claim of ev.claims) {
     claim.citations.forEach(c => quote(c.sourceId, c.quote));
@@ -95,10 +90,12 @@ export function validateEvidence(value: unknown, sources: Source[]): Evidence {
   }
   return ev;
 }
+
 export function refs(ids: string[], evidence: Evidence) {
   unique(ids, 'claim references');
   for (const id of ids) if (!evidence.claims.some(c => c.id === id)) throw new Error(`Unknown claim reference: ${id}`);
 }
+
 export function validateStoryboard(value: unknown, evidence: Evidence, contract: Contract): Storyboard {
   const board = storyboardSchema.parse(value);
   if (board.slides.length !== contract.slideCount) throw new Error('Storyboard does not match approved slide count');
@@ -111,6 +108,7 @@ export function validateStoryboard(value: unknown, evidence: Evidence, contract:
   }
   return board;
 }
+
 export function validateDeck(value: unknown, evidence: Evidence, board: Storyboard, sources: Source[]): Deck {
   const deck = deckSchema.parse(value);
   if (deck.slides.length !== board.slides.length) throw new Error('Deck slide count mismatch');
@@ -122,16 +120,14 @@ export function validateDeck(value: unknown, evidence: Evidence, board: Storyboa
       const f = evidence.figures.find(f => f.id === slide.figureId);
       if (!f || !slide.claimIds.some(id => evidence.claims.find(c => c.id === id)?.citations.some(c => c.sourceId === f.sourceId))) throw new Error('Chart lacks cited figure provenance');
     } else if (slide.figureId) throw new Error('figureId only allowed for chart');
-    if (slide.layout === 'image') {
-      if (!slide.asset || !sources.some(s => s.kind === 'image' && s.asset === slide.asset)) throw new Error('Image path is not an ingested asset');
-    } else if (slide.asset) throw new Error('asset only allowed for image');
     if (slide.layout === 'process' && slide.claimIds.length > 4) throw new Error('Process layout allows at most four steps');
     if (slide.layout === 'title' && slide.claimIds.length > 2) throw new Error('Title layout allows at most two claims');
-    if (['chart', 'image'].includes(slide.layout) && slide.claimIds.length > 3) throw new Error('Chart/image layout allows at most three claims');
+    if (slide.layout === 'chart' && slide.claimIds.length > 3) throw new Error('Chart layout allows at most three claims');
     if (slide.claimIds.reduce((n, id) => n + evidence.claims.find(c => c.id === id)!.text.length, 0) > 900) throw new Error('Slide exceeds text density limit');
   });
   return deck;
 }
+
 export function applyPatch(deck: Deck, patch: Deck, affected: string[]): Deck {
   unique(affected, 'affected slide ids'); unique(patch.slides.map(s => s.id), 'patch slide ids');
   if (affected.some(id => !deck.slides.some(s => s.id === id)) || canonical([...affected].sort()) !== canonical(patch.slides.map(s => s.id).sort())) throw new Error('Patch must contain exactly the affected slides');
@@ -139,4 +135,3 @@ export function applyPatch(deck: Deck, patch: Deck, affected: string[]): Deck {
   deck.slides.forEach((s, i) => { if (!affected.includes(s.id) && canonical(s) !== canonical(result.slides[i])) throw new Error('Unaffected slide mutated'); });
   return result;
 }
-export const evidenceFilesSchema = z.object({ claims: evidenceSchema.shape.claims, figures: evidenceSchema.shape.figures });

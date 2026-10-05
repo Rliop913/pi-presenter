@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { Store, atomicWrite, boundedRead, canonical, digest, safePath } from './storage.js';
+import path from 'node:path';
+import { Store, atomicWrite, boundedRead, canonical, digest, inside } from './storage.js';
 import { Dispatcher } from './dispatch.js';
 import { compile } from './compiler.js';
 import { render, validateRenders } from './renderer.js';
@@ -45,12 +46,14 @@ export class Pipeline {
     ), evidence, contract)), evidence, contract);
     await this.store.advance('DESIGN');
     const design = await this.cached('config/design-system.yaml', designSchema, () => this.dispatch.call('art_director', 'Choose a consistent high-contrast design system from the schema. Fixed widescreen layouts, no external fonts or generated assets.', designSchema, { contract, board }));
-    let deck = validateDeck(await this.cached('deck/deck-spec.yaml', deckSchema, async () => validateDeck(await this.dispatch.call('visual_designer', 'Produce fixed-layout deck spec preserving every storyboard slide id, order, title and claimIds exactly. Layout choices: title <=2 claims, process <=4, chart/image <=3. Images only from ingested asset paths; charts only existing figures. No arbitrary text/code/coordinates.', deckSchema, { contract, board, evidence, sources: sources.map(s => ({ id: s.id, kind: s.kind, asset: s.asset })), design }), evidence, board, sources)), evidence, board, sources);
+    const visualPayload = { contract, board, evidence, sources: sources.map(s => ({ id: s.id })), design };
+    const visualSpec = await this.dispatch.call('visual_designer', 'Produce fixed-layout deck spec preserving every storyboard slide id, order, title and claimIds exactly. Layout choices: title <=2 claims, process <=4, chart <=3. Charts only from existing figures. No arbitrary text/code/coordinates.', deckSchema, visualPayload);
+    let deck = validateDeck(await this.cached('deck/deck-spec.yaml', deckSchema, async () => validateDeck(visualSpec, evidence, board, sources)), evidence, board, sources);
     for (;;) {
       this.signal?.throwIfAborted(); await this.store.gate();
       if (this.store.checkpoint.pendingRevision) {
         const plan = this.store.checkpoint.pendingRevision;
-        const patch = await this.dispatch.call('visual_designer', 'Patch exactly and only the specified affected slides. Preserve storyboard title/claimIds; evidence and unaffected slides are immutable. Only modify layout/figure/asset choices within fixed schema.', patchSchema, { plan, deck, board, evidence, sources: sources.map(s => ({ id: s.id, asset: s.asset })), design });
+        const patch = await this.dispatch.call('visual_designer', 'Patch exactly and only the specified affected slides. Preserve storyboard title/claimIds; evidence and unaffected slides are immutable. Only modify layout/figure choices within fixed schema.', patchSchema, { plan, deck, board, evidence, sources: sources.map(s => ({ id: s.id })), design });
         deck = validateDeck(applyPatch(deck, patch, plan.affectedSlideIds), evidence, board, sources);
         await this.store.artifact(`deck/patch-${this.store.checkpoint.revision}.yaml`, patch);
         await this.store.artifact('deck/deck-spec.yaml', deck);
@@ -83,7 +86,7 @@ export class Pipeline {
     if (required.some(f => !this.store.checkpoint.artifacts[f])) throw new Error('Workspace is incomplete; run/resume before review or export');
     const sources = await this.store.read('evidence/sources.json', sourcesSchema);
     for (const [i, source] of sources.entries()) {
-      if (source.path !== contract.sources[i] || source.id !== `source_${i + 1}` || source.hash !== digest(await boundedRead(await safePath(this.store.cwd, source.path)))) throw new Error('Source provenance is stale');
+      if (source.id !== `source_${i + 1}` || source.text !== contract.sources[i] || source.hash !== digest(contract.sources[i])) throw new Error('Source provenance is stale');
     }
     if (sources.length !== contract.sources.length) throw new Error('Source count mismatch');
     const evidence = validateEvidence(await this.store.read('evidence/evidence.json', evidenceSchema), sources);
@@ -150,7 +153,8 @@ export class Pipeline {
   }
   async export() {
     await this.verifyComplete(); this.signal?.throwIfAborted();
-    const { contract } = await this.store.inputs(); const destination = await safePath(this.store.cwd, contract.output);
+    const { contract } = await this.store.inputs(); const destination = path.resolve(this.store.cwd, contract.output);
+    if (path.isAbsolute(contract.output) || contract.output.includes('\0') || contract.output === '.presentation' || contract.output.startsWith('.presentation/') || contract.output.startsWith('.presentation\\') || inside(path.resolve(this.store.cwd, '.presentation'), destination)) throw new Error('Export must be a project-relative .pptx outside .presentation');
     const bytes = await boundedRead(await this.store.file('output/presentation.pptx'), 64 * 1024 * 1024);
     if (digest(bytes) !== this.store.checkpoint.artifacts['output/presentation.pptx']) throw new Error('PPTX changed during export');
     await this.store.gate(); this.signal?.throwIfAborted();

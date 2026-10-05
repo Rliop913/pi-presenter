@@ -2,9 +2,9 @@ import { createRequire } from 'node:module';
 import type PptxModule from 'pptxgenjs';
 // PptxGenJS 4 ships CJS type declarations; use its native CJS constructor explicitly.
 const PptxGenJS = createRequire(import.meta.url)('pptxgenjs') as typeof PptxModule.default;
-import { Store, atomicWrite, boundedRead, digest, safePath } from './storage.js';
+import { Store, atomicWrite, digest } from './storage.js';
 import { designSchema, type Design, type Deck, type Evidence, type Source, type Storyboard } from './schema.js';
-import { validateDeck, validateEvidence, validateStoryboard, imageMime } from './evidence.js';
+import { validateDeck, validateEvidence, validateStoryboard } from './evidence.js';
 
 /** Fixed geometry and editable text/shapes/charts. No code or layout execution from models. */
 export async function compile(store: Store, deck: Deck, evidence: Evidence, board: Storyboard, sources: Source[], design: Design, signal?: AbortSignal) {
@@ -12,7 +12,7 @@ export async function compile(store: Store, deck: Deck, evidence: Evidence, boar
   const { contract } = await store.inputs();
   if (sources.length !== contract.sources.length) throw new Error('Compiler source count differs from approved contract');
   for (const [i, source] of sources.entries()) {
-    if (source.path !== contract.sources[i] || source.hash !== digest(await boundedRead(await safePath(store.cwd, source.path)))) throw new Error('Compiler source provenance differs from approved inputs');
+    if (source.id !== `source_${i + 1}` || source.text !== contract.sources[i] || source.hash !== digest(contract.sources[i])) throw new Error('Compiler source provenance differs from approved inputs');
   }
   validateEvidence(evidence, sources); validateStoryboard(board, evidence, contract); validateDeck(deck, evidence, board, sources); designSchema.parse(design);
   const pptx = new PptxGenJS();
@@ -53,13 +53,6 @@ export async function compile(store: Store, deck: Deck, evidence: Evidence, boar
       case 'chart': {
         const figure = evidence.figures.find(f => f.id === spec.figureId)!;
         slide.addChart(pptx.ChartType.bar, [{ name: figure.unit || figure.title, labels: figure.labels, values: figure.values }], { x: 0.85, y: 1.85, w: 7.35, h: 4.6, catAxisLabelFontFace: design.font, catAxisLabelFontSize: 14, valAxisLabelFontSize: 14, showLegend: false, showTitle: true, title: figure.title, titleFontSize: 18, chartColors: [design.accent], showValue: true, dataLabelFormatCode: '0.##' });
-        drawList(body, 8.65, 3.85); break;
-      }
-      case 'image': {
-        const file = await store.file(spec.asset!); const bytes = await boundedRead(file);
-        imageMime(bytes);
-        if (!sources.some(s => s.asset === spec.asset && s.hash === digest(bytes))) throw new Error('Image asset hash does not match source provenance');
-        slide.addImage({ path: file, x: 0.85, y: 1.85, w: 7.35, h: 4.65, sizing: { type: 'contain', w: 7.35, h: 4.65 } });
         drawList(body, 8.65, 3.85); break;
       }
     }

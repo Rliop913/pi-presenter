@@ -5,34 +5,29 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import type ZipModule from 'jszip';
 import { compile } from '../src/compiler.js';
-import { render, validateRenders } from '../src/renderer.js';
+import { render } from '../src/renderer.js';
 import { runCommand } from '../src/process.js';
 import { Pipeline } from '../src/pipeline.js';
 import { Store, atomicWrite, boundedRead, digest } from '../src/storage.js';
-import { deckSchema, evidenceSchema, passed, type Deck, type Source, type Storyboard } from '../src/schema.js';
+import { deckSchema, evidenceSchema, passed, type Deck, type Storyboard } from '../src/schema.js';
 import { ingest } from '../src/evidence.js';
 import { agents, contract, board, deck, design, evidence, fixture, goodReview, mockPng, MockPipeline } from './fixtures.js';
 const JSZip = createRequire(import.meta.url)('jszip') as typeof ZipModule;
 
-test('offline real PPTX compiler creates editable text/shapes/charts/images for all six layouts', async t => {
+test('offline real PPTX compiler creates editable text/shapes/charts for all five layouts', async t => {
   const f = await fixture(); t.after(f.cleanup);
-  const bytes = mockPng(); await atomicWrite(path.join(f.cwd, 'source.png'), bytes);
-  await f.store.define({ ...contract, slideCount: 6, sources: ['source.md', 'source.png'] }); await f.store.configure(agents); await f.store.approve(await f.store.fingerprint(), 'Approve & Start');
-  await atomicWrite(await f.store.file('assets/source_2.png'), bytes); await f.store.track('assets/source_2.png');
-  const sources: Source[] = [...f.sources, { id: 'source_2', path: 'source.png', hash: digest(bytes), kind: 'image', text: '', asset: 'assets/source_2.png' }];
-  const layouts = ['title', 'two-column', 'bullets', 'process', 'chart', 'image'] as const;
+  await f.store.define({ ...contract, slideCount: 5 }); await f.store.configure(agents); await f.store.approve(await f.store.fingerprint(), 'Approve & Start');
+  const layouts = ['title', 'two-column', 'bullets', 'process', 'chart'] as const;
   const b: Storyboard = { slides: layouts.map((_, i) => ({ id: `slide_${i}`, title: `Pilot evidence`, claimIds: ['claim_b'], intent: 'Explain pilot' })) };
-  const d: Deck = { slides: layouts.map((layout, i) => ({ id: b.slides[i].id, title: b.slides[i].title, claimIds: b.slides[i].claimIds, layout, ...(layout === 'chart' ? { figureId: 'figure_a' } : {}), ...(layout === 'image' ? { asset: 'assets/source_2.png' } : {}) })) };
-  await compile(f.store, d, evidence, b, sources, design);
+  const d: Deck = { slides: layouts.map((layout, i) => ({ id: b.slides[i].id, title: b.slides[i].title, claimIds: b.slides[i].claimIds, layout, ...(layout === 'chart' ? { figureId: 'figure_a' } : {}) })) };
+  await compile(f.store, d, evidence, b, f.sources, design);
   const pptx = await boundedRead(await f.store.file('output/presentation.pptx'));
   assert.equal(pptx.subarray(0, 2).toString(), 'PK');
   const zip = await JSZip.loadAsync(pptx);
-  const slides = Object.keys(zip.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n)); assert.equal(slides.length, 6);
+  const slides = Object.keys(zip.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n)); assert.equal(slides.length, 5);
   assert.ok((await zip.file('ppt/slides/slide1.xml')!.async('string')).includes('Pilot Alpha recorded 100 requests.'));
   assert.ok(Object.keys(zip.files).some(n => /^ppt\/charts\/chart\d+\.xml$/.test(n)));
   assert.ok(Object.keys(zip.files).some(n => /embeddings\/.*xlsx$/.test(n)));
-  assert.ok(Object.keys(zip.files).some(n => /^ppt\/media\//.test(n)));
-  assert.ok((await zip.file('ppt/slides/slide6.xml')!.async('string')).includes('<p:pic>'));
   assert.ok((await zip.file('ppt/notesSlides/notesSlide1.xml')!.async('string')).includes('source_1'));
   assert.equal(f.registry.calls.length, 0);
 });
@@ -76,7 +71,7 @@ test('MOCK integration: approval -> evidence -> storyboard -> real compilation -
       assert.equal(Buffer.from(images[0].data, 'base64').subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
     }
   }
-  const destination = await pipeline.export(); assert.equal(destination, await fs.realpath(path.join(f.cwd, contract.output)));
+  const destination = await pipeline.export(); assert.equal(destination, path.resolve(f.cwd, contract.output));
   assert.equal(digest(await boundedRead(destination)), f.store.checkpoint.artifacts['output/presentation.pptx']);
   const priorCalls = f.registry.calls.length;
   const restored = new Store(f.cwd, f.registry); await restored.load(); await new Pipeline(restored).run();
@@ -130,13 +125,19 @@ test('stale extra PNG, missing review record and stale binding block export', as
   delete f.store.checkpoint.artifacts[reviewFile]; await f.store.save();
   await assert.rejects(() => pipeline.export(), /all current review/);
 });
-test('local CSV/JSON/text/images ingested and PDF missing extractor fails explicitly', async t => {
+test('multiple freeform text sources ingested and total size limit enforced', async t => {
   const f = await fixture(); t.after(f.cleanup);
-  const sources = ['data.csv', 'data.json', 'notes.txt', 'photo.png'];
-  const data = ['name,value\nAlpha,100', '{"Alpha":100}', 'Plain text', mockPng()];
-  for (const [i, file] of sources.entries()) await atomicWrite(path.join(f.cwd, file), data[i]);
-  const c = { ...contract, sources }; await f.store.define(c); await f.store.configure(agents); await f.store.approve(await f.store.fingerprint(), 'Approve & Start');
-  const result = await ingest(f.store, c); assert.equal(result.length, 4); assert.equal(result[3].kind, 'image'); assert.ok(result[3].asset);
-  await f.store.define({ ...contract, sources: ['report.pdf'] }); await atomicWrite(path.join(f.cwd, 'report.pdf'), '%PDF-MOCK'); await f.store.configure(agents); await f.store.approve(await f.store.fingerprint(), 'Approve & Start');
-  await assert.rejects(() => ingest(f.store, { ...contract, sources: ['report.pdf'] }, undefined, async () => { throw new Error('pdftotext missing'); }), /pdftotext missing/);
+  const texts = ['name,value\nAlpha,100', '{"Alpha":100}', 'Plain text'];
+  const c = { ...contract, sources: texts }; await f.store.define(c); await f.store.configure(agents); await f.store.approve(await f.store.fingerprint(), 'Approve & Start');
+  const result = await ingest(f.store, c);
+  assert.equal(result.length, 3);
+  for (const [i, source] of result.entries()) {
+    assert.equal(source.id, `source_${i + 1}`);
+    assert.equal(source.text, texts[i]);
+    assert.equal(source.hash, digest(texts[i]));
+  }
+  await assert.rejects(f.store.define({ ...contract, sources: ['x'.repeat(300001)] }), /Too big|300000/);
+  const a = 'a'.repeat(300000); const b = 'b'.repeat(300000);
+  await f.store.define({ ...contract, sources: [a, b] }); await f.store.configure(agents); await f.store.approve(await f.store.fingerprint(), 'Approve & Start');
+  await assert.rejects(() => ingest(f.store, { ...contract, sources: [a, b] }), /500000 characters/);
 });

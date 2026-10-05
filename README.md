@@ -17,19 +17,18 @@ Pi supplies the `@earendil-works/pi-coding-agent` and `@earendil-works/pi-ai` pe
 
 ### Real rendering prerequisites
 
-Install **LibreOffice** (`soffice`) and **Poppler** (`pdftoppm`; `pdftotext` for PDF sources) and put their executables on Pi's PATH. On Windows, LibreOffice's `program` directory and the Poppler binary directory must be on PATH. Fonts Arial, Calibri, or Aptos must exist for consistent appearance. Verify:
+Install **LibreOffice** (`soffice`) and **Poppler** (`pdftoppm`) and put their executables on Pi's PATH. On Windows, LibreOffice's `program` directory and the Poppler binary directory must be on PATH. Fonts Arial, Calibri, or Aptos must exist for consistent appearance. Verify:
 
 ```sh
 soffice --version
 pdftoppm -v
-pdftotext -v
 ```
 
 Missing tools, bad PDF output, malformed PNGs, or wrong page counts fail closed. Production rendering is exclusively **compiled PPTX → LibreOffice PDF → pdftoppm PNGs**. No HTML previews, placeholder slides, or synthetic screenshots satisfy production QA.
 
 ## Commands
 
-Run Pi in the project containing your local source files.
+Run Pi in any project. Sources are freeform text the user pastes into the wizard; no project-root files are required.
 
 | Command | Behavior |
 |---|---|
@@ -42,9 +41,9 @@ Run Pi in the project containing your local source files.
 | `/presenter export` | Copy current PPTX to the contract's output path only when COMPLETE and all current QA hashes/scores pass |
 | `/presenter cancel` | Abort the owned operation/dialogs; keep validated checkpoints for resume |
 
-Setup collects title, purpose, audience, duration, slide count, project-relative source paths, output path and requirements. Paths are entered one per line (source list also permits pasted newlines). Input dialogs show existing/default values as placeholders: enter the value you want to retain. Native `input`, `select` and `notify` dialogs work in TUI and dialog-capable RPC; headless modes cannot create approval. Cancellation never initiates production. Entering configure revokes existing approval even if subsequently cancelled. New replaces the project presentation after contract collection.
+Setup collects title, purpose, audience, duration, slide count, **freeform text sources**, output path and requirements. Every field is validated as the user types: a typo on slide count, an empty output, an over-long title, or an absolute output path re-prompts the same dialog with the error so the wizard never aborts mid-flight. Sources are 1–20 natural-language context chunks (not file paths): the user pastes each chunk into its own dialog; after the first source, leaving the dialog empty finishes the list. Input dialogs show existing/default values as placeholders: enter the value you want to retain. Native `input`, `select` and `notify` dialogs work in TUI and dialog-capable RPC; headless modes cannot create approval. Cancellation never initiates production. Entering configure revokes existing approval, even if a later dialog is cancelled.
 
-**Before approval there are no presentation model calls, source extraction/research, narrative/design calls, or compilation.** Reading raw bytes to fingerprint approved files and discovering the synchronous available registry are configuration validation, not research. The initial contract is supplied by the user. Director refinement happens only after approval and cannot change approved counts, sources, output or scope.
+**Before approval there are no presentation model calls, evidence extraction/research, narrative/design calls, or compilation.** Reading the user-supplied config files to fingerprint the approved inputs and discovering the synchronous available registry are configuration validation, not research. The initial contract is supplied by the user as freeform text. Director refinement happens only after approval and cannot change approved counts, sources, output or scope.
 
 ### Exact assignments, not aliases or fallback
 
@@ -60,7 +59,7 @@ Presets suggest IDs only, not presumed providers or executable defaults:
 
 Every role requires an explicit selection from the actual credential-available Pi registry, preserving exact **provider + model ID + effort**. Missing suggested IDs require explicit replacement. Visual review requires image input capability. Effort choices come from the host helper, not a hardcoded model-name heuristic. No silent clamp, model substitution, provider guess, or fallback is allowed. A provider reporting a different response model also fails closed; alias/snapshot mismatches may therefore need an exact catalog assignment.
 
-Approval records the full matrix and a SHA-256 fingerprint of raw presentation/agent configuration, local sources, and relevant registry capability/effort metadata. Any change to those inputs invalidates approval. The generated design-system configuration is also hash-tracked; changing it revokes approval. Reconfigure to restart after stale artifacts or config changes. Checkpoint hashes detect accidental edits, **not an attacker rewriting both files and checkpoint hashes**; this is not a signature/security boundary against trusted local code.
+Approval records the full matrix and a SHA-256 fingerprint of raw presentation/agent configuration, source text hashes, and relevant registry capability/effort metadata. Any change to those inputs invalidates approval. The generated design-system configuration is also hash-tracked; changing it revokes approval. Reconfigure to restart after stale artifacts or config changes. Checkpoint hashes detect accidental edits, **not an attacker rewriting both files and checkpoint hashes**; this is not a signature scheme.
 
 ## Pipeline and artifacts
 
@@ -90,7 +89,6 @@ The workflow owns isolated provider calls: fresh system/user messages, no parent
   deck/deck-spec.yaml
   deck/before-revision-N.yaml
   deck/patch-N.yaml
-  assets/
   renders/presentation.pdf
   renders/slide-N.png
   renders/manifest.json
@@ -102,17 +100,19 @@ The workflow owns isolated provider calls: fresh system/user messages, no parent
 
 Evidence claims require exact source quotes and valid source IDs. Numbers are conservatively checked against literal citations: a numeric-bearing claim must be an exact sourced statement; numeric titles must be an exact supported claim substring. No derived arithmetic. Charts require literal label/value associations and source unit provenance. Models cannot invent claim references. Qualitative entailment and nuanced data interpretation still require the fact reviewer and human judgment.
 
-Narrative Architect builds an argument map; Director must accept it at narrative ≥8 before storyboard. Storyboards must match the approved slide count and valid claims. Art Director emits a bounded design system. Visual Designer can choose only fixed layouts and known assets/figures. Compiler inserts evidence text directly, not model-authored executable content. Titles and storyboard claim IDs remain immutable during visual design/revisions.
+Narrative Architect builds an argument map; Director must accept it at narrative ≥8 before storyboard. Storyboards must match the approved slide count and valid claims. Art Director emits a bounded design system. Visual Designer can choose only fixed layouts from the schema. Compiler inserts evidence text directly, not model-authored executable content. Titles and storyboard claim IDs remain immutable during visual design/revisions.
 
-The six widescreen layouts are **title, two-column, bullets, process, chart, image**. Text, shapes and charts are editable; embedded images remain raster images. Typography, margins and density limits are fixed. Slide footers and speaker notes carry citation refs/quotes. Geometry/spec interpretation is deterministic, but **PPTX bytes are not promised identical**: ZIP timestamps and document metadata are not normalized.
+The five widescreen layouts are **title, two-column, bullets, process, chart**. Text, shapes and charts are editable. Typography, margins and density limits are fixed. Slide footers and speaker notes carry citation refs/quotes. Geometry/spec interpretation is deterministic, but **PPTX bytes are not promised identical**: ZIP timestamps and document metadata are not normalized.
 
 Fact review must score factual ≥9 and narrative ≥8. Actual PNG image blocks are sent to the vision reviewer separately for every slide; narrative, hierarchy, consistency and readability must each be ≥8. Any major/critical finding blocks completion regardless of scores. Director integrates failed reviews into a slide-specific patch plan. Only named affected slides can change; all blocking findings must be covered, and unaffected specs/evidence/design/storyboard are preserved. The default is two revision attempts (configurable `maxRevisions` 0–3 before approval). Each patch recompiles, rerenders and rechecks the whole deck. A factual/narrative error requiring evidence or storyboard changes intentionally cannot be repaired by the visual patcher: correct sources/requirements and reconfigure. Exhaustion or failure leaves export blocked.
 
 ## Source and safety limits
 
-Supported local `.txt`, `.md`, `.markdown`, `.csv`, `.json`, `.pdf`, `.png`, `.jpg`, `.jpeg`; UTF-8 text only. CSV/JSON remain quoted source text, not arbitrary code or formulas. PDF extraction uses fixed-argv `pdftotext`; scanned PDFs without text need external preparation (no OCR). Images are assets, not primary factual evidence in this MVP. Sources must stay under the project root; symlink/junction escapes are rejected. No web research, OCR, network asset fetching, generated images, SVG, or remote sources. Export must be a root-relative `.pptx` outside `.presentation` and can overwrite that approved destination.
+Sources are **freeform text** the user pastes into the wizard. The package never reads source files from disk, so there is no path traversal, no image/CSV/PDF ingestion, and no `pdftotext`/LibreOffice extraction step. Every source is treated as untrusted natural-language context; the model must quote it verbatim. No web research, OCR, network asset fetching, generated images, SVG, or remote sources. Export must be a root-relative `.pptx` outside `.presentation` and can overwrite that approved destination.
 
-Limits: 20 files, 8 MiB/file, 24 MiB/raw total, 300k extracted characters/file, 500k extracted characters total, 30 slides, bounded claim/title lengths and density. Model prompt instructions explicitly classify all source/artifact data as untrusted; deterministic validation and absence of tools reduce prompt injection risks but cannot guarantee semantic model compliance. LibreOffice/Poppler process untrusted files with host permissions; keep them patched. This extension is not a sandbox.
+Limits: 1–20 sources, 300k characters per source, 500k characters total, 30 slides, bounded claim/title lengths and density. Model prompt instructions explicitly classify all source/artifact data as untrusted; deterministic validation and absence of tools reduce prompt injection risks but cannot guarantee semantic model compliance. LibreOffice/Poppler process the generated PPTX and slide PNGs with host permissions; keep them patched. This extension is not a sandbox.
+
+
 
 One exclusive disk operation lock covers setup/run/review/export. Normal errors/cancel release it. Atomic writes use temp files, file fsync and rename; each completed unit is hash-checkpointed. Resume reuses only validated registered artifacts, never leftover files. A process crash between an artifact rename and checkpoint update can conservatively require reconfiguration rather than reuse partially committed data. Directory fsync/power-loss durability is not guaranteed on every filesystem. After a hard crash, inspect `.presentation/operation.lock` and verify its recorded PID is dead before deleting the lock; do not remove a live process's lock.
 
