@@ -62,7 +62,7 @@ test('MOCK integration: approval -> evidence -> storyboard -> real compilation -
   assert.equal(d.slides[0].layout, 'title'); assert.deepEqual(d.slides[1], before.slides[1]);
   const e = await f.store.read('evidence/evidence.json', evidenceSchema); assert.deepEqual(e, evidence);
   assert.equal(f.store.checkpoint.trace.filter(r => r.role === 'evidence_researcher').length, 1);
-  const visual = f.registry.calls.filter(c => JSON.stringify(c.context.messages[0]).includes("visual_reviewer"));
+  const visual = f.registry.calls.filter(c => JSON.stringify(c.context.messages[0]).includes("Pi Presenter's visual_reviewer."));
   assert.equal(visual.length, 4);
   for (const call of visual) {
     const user = call.context.messages[1]; assert.ok(user.role === 'user' && Array.isArray(user.content));

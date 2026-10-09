@@ -1,3 +1,5 @@
+// Native user/configuration and historical receipt metadata only.
+// NOT a schema for analysis, planning, design, review or any model response.
 import { z } from "zod";
 
 export const roles = [
@@ -28,12 +30,6 @@ const long = z.string().trim().min(1).max(2000);
 const id = z.string().regex(/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/);
 const sha = z.string().regex(/^[a-f0-9]{64}$/);
 const sourceText = z.string().trim().min(1).max(300000);
-// Every field has a sensible default so the contract can be created
-// Narrative wording is not a normalization contract; only bound transport memory.
-const modelText = z.string().max(200000);
-// from a single natural-language description (or even an empty input).
-// The skill drives the conversation in natural language; the schema
-// is the final validation, not an input form.
 export const contractSchema = z
   .object({
     // The user's freeform description captured by the wizard. This is
@@ -122,153 +118,9 @@ export function assignmentForRole(agents: Agents, role: Role): Assignment {
 export function assignmentRoles(agents: Agents): (Role | Unit)[] {
   return isCompactAgents(agents) ? [...units] : [...roles];
 }
-export const sourceSchema = z
-  .object({ id, text: sourceText, hash: sha })
-  .strict();
-export type Source = z.infer<typeof sourceSchema>;
-export const sourcesSchema = z.array(sourceSchema).min(1).max(20);
-const citation = z
-  .object({ sourceId: id, quote: modelText })
-  .strip();
-export const claimSchema = z
-  .object({
-    id,
-    text: modelText,
-    citations: z.array(citation).min(1).max(5),
-  })
-  .strip();
-export const figureSchema = z
-  .object({
-    id,
-    title: modelText,
-    sourceId: id,
-    quote: modelText,
-    labels: z.array(modelText).min(1).max(8),
-    values: z.array(z.number().finite()).min(1).max(8),
-    unit: modelText,
-  })
-  .strip();
-// Both fields default to `[]` so a model that omits them (e.g. due to
-// truncation) is accepted, and the pipeline can apply a fallback claim
-// from the source text instead of failing with a cryptic Zod error.
-// The "at least one claim" contract is enforced at the pipeline level
-// (see `fallbackEvidence` in evidence.ts) so the storyboard step always
-// has something to reference.
-export const evidenceSchema = z
-  .object({
-    claims: z.array(claimSchema).max(150).default([]),
-    figures: z.array(figureSchema).max(20).default([]),
-  })
-  .strip();
-export type Evidence = z.infer<typeof evidenceSchema>;
-export const executionPlanSchema = z.object({
-  timeoutsByRole: z.partialRecord(z.enum(roles), z.number().int().min(1).max(600000)).optional(),
-  maxAttempts: z.number().int().min(1).max(3).optional(),
-  retryDelayMs: z.number().int().min(0).max(5000).optional(),
-  maxOutputTokens: z.number().int().min(512).max(32000).optional(),
-  narrativeRevisions: z.number().int().min(0).max(2).optional(),
-}).strict();
-export type ExecutionPlan = z.infer<typeof executionPlanSchema>;
-export const directorSchema = z
-  .object({
-    objective: modelText,
-    thesis: modelText,
-    successCriteria: z.array(modelText).min(1).max(6),
-    executionPlan: executionPlanSchema.optional(),
-  })
-  .strip();
-export const argumentSchema = z
-  .object({
-    thesis: modelText,
-    sections: z
-      .array(
-        z
-          .object({
-            title: modelText,
-            claimIds: z.array(id).min(1).max(10),
-            rationale: modelText,
-          })
-          .strip(),
-      )
-      .min(1)
-      .max(30),
-  })
-  .strip();
-export const acceptanceSchema = z
-  .object({
-    accepted: z.boolean(),
-    narrative: z.number().min(0).max(10),
-    rationale: modelText,
-    executionPlan: executionPlanSchema.optional(),
-  })
-  .strip();
-export const storyboardSchema = z
-  .object({
-    slides: z
-      .array(
-        z
-          .object({
-            id,
-            title: modelText,
-            claimIds: z.array(id).min(1).max(6),
-            intent: modelText,
-          })
-          .strip(),
-      )
-      .min(1)
-      .max(30),
-  })
-  .strip();
-export type Storyboard = z.infer<typeof storyboardSchema>;
-export const designSchema = z
-  .object({
-    font: z.enum(["Aptos", "Arial", "Calibri"]),
-    background: z.string().regex(/^[A-Fa-f0-9]{6}$/),
-    foreground: z.string().regex(/^[A-Fa-f0-9]{6}$/),
-    accent: z.string().regex(/^[A-Fa-f0-9]{6}$/),
-    titleSize: z.number().min(28).max(36),
-    bodySize: z.number().min(18).max(24),
-  })
-  .strict();
-export type Design = z.infer<typeof designSchema>;
-export const slideSchema = z
-  .object({
-    id,
-    title: modelText,
-    layout: z.enum(["title", "two-column", "bullets", "process", "chart"]),
-    claimIds: z.array(id).min(1).max(6),
-    figureId: id.optional(),
-  })
-  .strip();
-export const deckSchema = z
-  .object({ slides: z.array(slideSchema).min(1).max(30) })
-  .strict();
-export type Deck = z.infer<typeof deckSchema>;
-export const findingSchema = z
-  .object({
-    slideId: id,
-    severity: z.enum(["minor", "major", "critical"]),
-    issue: modelText,
-    fix: modelText,
-  })
-  .strip();
-export const reviewSchema = z
-  .object({
-    factual: z.number().min(0).max(10),
-    narrative: z.number().min(0).max(10),
-    hierarchy: z.number().min(0).max(10),
-    consistency: z.number().min(0).max(10),
-    readability: z.number().min(0).max(10),
-    findings: z.array(findingSchema).max(100),
-  })
-  .strip();
-export type Review = z.infer<typeof reviewSchema>;
-export const revisionSchema = z
-  .object({ affectedSlideIds: z.array(id).min(1).max(30), instructions: long })
-  .strict();
-export const patchSchema = z
-  .object({ slides: z.array(slideSchema).min(1).max(30) })
-  .strict();
+
+// Read-only compatibility for a prior engine's pending revision receipt.
+const revisionSchema = z.object({ affectedSlideIds: z.array(id).min(1).max(30), instructions: long }).strip();
 export const states = [
   "UNINITIALIZED",
   "PRESENTATION_DEFINED",
@@ -324,14 +176,3 @@ export const checkpointSchema = z
   })
   .strict();
 export type Checkpoint = z.infer<typeof checkpointSchema>;
-export function passed(fact: Review, visual: Review): boolean {
-  return (
-    fact.factual >= 9 &&
-    fact.narrative >= 8 &&
-    visual.narrative >= 8 &&
-    visual.hierarchy >= 8 &&
-    visual.consistency >= 8 &&
-    visual.readability >= 8 &&
-    ![...fact.findings, ...visual.findings].some((f) => f.severity !== "minor")
-  );
-}

@@ -10,10 +10,19 @@
     "pptx"
   ],
   "files": [
-    "src",
+    "src/index.ts",
+    "src/file-tools.ts",
+    "src/authority-schema.ts",
+    "src/storage.ts",
+    "src/models.ts",
+    "src/wizard.ts",
+    "src/process.ts",
+    "src/dependencies.ts",
+    "src/reference-sites.ts",
+    "src/design-references.ts",
     "skills",
-    "examples",
     "README.md",
+    "docs/design-references-and-dependencies.md",
     "LICENSE"
   ],
   "pi": {
@@ -26,22 +35,25 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/skill-*.test.ts tests/dependencies.test.ts tests/reference-bounds.test.ts tests/assignments.test.ts tests/presets.test.ts",
+    "test:skill": "tsx --test tests/skill-*.test.ts"
   },
   "dependencies": {
+    "parse5": "8.0.0",
     "pptxgenjs": "4.0.0",
+    "jszip": "^3.10.1",
     "yaml": "^2.8.1",
     "zod": "^4.1.12"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*"
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
     "@types/node": "^22.19.0",
-    "jszip": "^3.10.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   },

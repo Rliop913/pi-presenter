@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { parse, stringify } from 'yaml';
 import type { z } from 'zod';
-import { agentsSchema, checkpointSchema, contractSchema, states, type Agents, type Checkpoint, type Contract, type State } from './schema.js';
+import { agentsSchema, checkpointSchema, contractSchema, states, type Agents, type Checkpoint, type Contract, type State } from './authority-schema.js';
 import { capabilities, validateAgents, type Registry } from './models.js';
 
 export const digest = (data: string | Uint8Array) => createHash('sha256').update(data).digest('hex');
@@ -113,8 +113,9 @@ export class Store {
   }
   async configure(agents: Agents) {
     validateAgents(this.registry, agents);
-    delete this.checkpoint.approval;
-    this.checkpoint.artifacts = {}; this.checkpoint.revision = 0; delete this.checkpoint.pendingRevision;
+    // Reconfiguration is a new approval boundary, never an approval conversion.
+    // Drop all repair feedback/counters and cached policy along with artifacts.
+    this.checkpoint = { version: 1, state: this.checkpoint.state, artifacts: {}, revision: 0, trace: [] };
     await this.move('AGENTS_CONFIGURED');
     await atomicWrite(await this.file('config/agents.yaml'), stringify(agents));
     await this.move('AWAITING_APPROVAL');

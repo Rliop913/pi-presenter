@@ -11,7 +11,7 @@ import { ingest, validateEvidence, validateStoryboard, validateDeck, applyPatch 
 import { validateAgents } from '../src/models.js';
 import { contractWizard, agentsWizard, approvalDialog, type DialogUI } from '../src/wizard.js';
 import { presenterCommand } from '../src/index.js';
-import { directorSchema, evidenceSchema } from '../src/schema.js';
+import { directorSchema, evidenceSchema, isCompactAgents, units } from '../src/schema.js';
 import { agents, board, contract, deck, design, evidence, fixture, MockRegistry, MockPipeline } from './fixtures.js';
 
 const cancelledUI: DialogUI = { input: async () => undefined, select: async () => undefined, notify: () => {} };
@@ -39,9 +39,9 @@ test('every contract wizard cancellation position leaves zero execution', async 
   }
   assert.equal(f.registry.calls.length, 0);
 });
-test('every role/model/effort dialog cancellation leaves zero execution', async t => {
+test('every unit/model/effort dialog cancellation leaves zero execution', async t => {
   const f = await fixture(false); t.after(f.cleanup);
-  for (let cancel = 0; cancel < 15; cancel++) {
+  for (let cancel = 0; cancel < 1 + 2 * units.length; cancel++) {
     let i = 0;
     const ui = { ...cancelledUI, select: async (_: string, options: string[]) => i++ === cancel ? undefined : options[0] };
     assert.equal(await agentsWizard(ui, f.store), undefined);
@@ -74,7 +74,11 @@ test('raw YAML edits, source-text edits, model capability changes and approved-m
     if (mutation === 'source') await fs.appendFile(await f.store.file('config/presentation.yaml'), '\n# edit');
     if (mutation === 'registry') f.registry.available[0].contextWindow++;
     if (mutation === 'effort-map') f.registry.available[0].thinkingLevelMap!.medium = 'native-effort-changed';
-    if (mutation === 'matrix') f.store.checkpoint.approval!.matrix.director.effort = 'low';
+    if (mutation === 'matrix') {
+      const matrix = f.store.checkpoint.approval!.matrix;
+      assert.ok(!isCompactAgents(matrix));
+      matrix.director.effort = 'low';
+    }
     await assert.rejects(() => new Dispatcher(f.store).call('director', 'Refine', directorSchema, {}));
     assert.equal(f.store.checkpoint.state, 'AWAITING_APPROVAL'); assert.equal(f.store.checkpoint.approval, undefined);
     assert.equal(f.registry.calls.length, 0);
@@ -93,12 +97,12 @@ test('fresh isolated stream uses exact model/effort, no tools, usage trace; reje
   const req = f.registry.calls[0]; assert.equal(req.model.id, agents.director.id);
   assert.equal(req.options?.reasoning, 'medium'); assert.equal(req.options?.toolChoice, 'none');
   assert.equal(req.context.messages.length, 2); assert.equal(req.context.messages[0].role, 'system');
-  assert.ok(JSON.stringify(req.context).includes('UNTRUSTED DATA')); assert.equal('tools' in req.context, false);
+  assert.ok(JSON.stringify(req.context).includes('untrusted data')); assert.equal('tools' in req.context, false);
   assert.deepEqual(f.store.checkpoint.trace[0].usage, { input: 12, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 32, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } });
   f.registry.substituted = true; await assert.rejects(call, /substituted/);
   f.registry.substituted = false; f.registry.clamped = true; await assert.rejects(call, /no clamping/);
   assert.equal(f.store.checkpoint.trace.at(-1)?.reportedEffort, 'low'); assert.equal(f.store.checkpoint.trace.at(-1)?.providerEffort, 'native-low');
-  f.registry.clamped = false; f.registry.malformed = true; await assert.rejects(call, /strict JSON/);
+  f.registry.clamped = false; f.registry.malformed = true; await assert.rejects(call, /handoff could not read/);
   await assert.rejects(() => new Dispatcher(f.store).call('visual_reviewer', 'Inspect', directorSchema, {}), /actual rendered/);
 });
 test('dispatch cancellation bounds even a provider ignoring abort; checkpoint remains resumable', async t => {
@@ -140,7 +144,7 @@ test('dispatch notifier receives error event with role, duration, and error mess
   const events: DispatchEvent[] = [];
   f.registry.malformed = true;
   const dispatcher = new Dispatcher(f.store, undefined, (e) => events.push(e));
-  await assert.rejects(() => dispatcher.call('director', 'Refine user contract', directorSchema, { contract }), /strict JSON/);
+  await assert.rejects(() => dispatcher.call('director', 'Refine user contract', directorSchema, { contract }), /handoff could not read/);
   assert.equal(events.length, 2);
   assert.equal(events[0].kind, 'start');
   assert.equal(events[1].kind, 'error');
@@ -149,7 +153,7 @@ test('dispatch notifier receives error event with role, duration, and error mess
   assert.equal(error.callIndex, 1);
   assert.equal(error.callBudget, 180);
   assert.equal(error.durationMs >= 0, true);
-  assert.ok(error.error.includes('strict JSON'));
+  assert.ok(error.error.includes('handoff could not read'));
 });
 test('dispatch notifier counts each call against the budget', async t => {
   const f = await fixture(); t.after(f.cleanup);
@@ -193,7 +197,7 @@ test('dispatcher still fails closed when fenced content is not valid JSON', asyn
   f.registry.fenced = true;
   f.registry.malformed = true;
   const dispatcher = new Dispatcher(f.store);
-  await assert.rejects(() => dispatcher.call('director', 'Refine user contract', directorSchema, { contract }), /strict JSON/);
+  await assert.rejects(() => dispatcher.call('director', 'Refine user contract', directorSchema, { contract }), /handoff could not read/);
   assert.equal(f.store.checkpoint.trace[0].outcome, 'error');
 });
 test('one operation lock protects disk and releases on errors', async t => {
@@ -217,17 +221,17 @@ test('source size and total limits fail closed', async t => {
   await f.store.define({ ...contract, sources: [a, b] }); await f.store.configure(agents); await f.store.approve(await f.store.fingerprint(), 'Approve & Start');
   await assert.rejects(() => ingest(f.store, { ...contract, sources: [a, b] }), /500000 characters/);
 });
-test('claim citations, numeric assertions, storyboard refs, layouts and chart references cannot be invented', async t => {
+test('semantic truth is reviewed by LLM; structural compiler references remain intact', async t => {
   const f = await fixture(); t.after(f.cleanup);
   assert.deepEqual(validateEvidence(evidence, f.sources), evidence);
-  const bad = structuredClone(evidence); bad.claims[0].citations[0].quote = 'fabricated'; assert.throws(() => validateEvidence(bad, f.sources), /Invalid citation/);
-  bad.claims[0].citations[0].quote = evidence.claims[0].citations[0].quote; bad.claims[0].text = 'Improvement 999%'; assert.throws(() => validateEvidence(bad, f.sources), /Unsupported numeric/);
+  const bad = structuredClone(evidence); bad.claims[0].citations[0].quote = 'Paraphrased source explanation'; assert.doesNotThrow(() => validateEvidence(bad, f.sources));
+  bad.claims[0].text = 'Improvement 999%'; assert.doesNotThrow(() => validateEvidence(bad, f.sources)); // Must be challenged by independent factual QA, not regex.
   const numericSwap = structuredClone(evidence); numericSwap.claims[1].text = 'Pilot Beta recorded 100 requests.';
-  assert.throws(() => validateEvidence(numericSwap, f.sources), /exact sourced statement/);
+  assert.doesNotThrow(() => validateEvidence(numericSwap, f.sources));
   const chartSwap = structuredClone(evidence); chartSwap.figures[0].values = [200, 100];
-  assert.throws(() => validateEvidence(chartSwap, f.sources), /association/);
+  assert.doesNotThrow(() => validateEvidence(chartSwap, f.sources));
   assert.throws(() => validateStoryboard({ slides: [{ ...board.slides[0], claimIds: ['invented'] }, board.slides[1]] }, evidence, contract), /Unknown claim/);
-  assert.throws(() => validateStoryboard({ slides: [{ ...board.slides[0], title: 'Improvement 999%' }, board.slides[1]] }, evidence, contract), /Unsupported numeric/);
+  assert.doesNotThrow(() => validateStoryboard({ slides: [{ ...board.slides[0], title: 'Improvement 999%' }, board.slides[1]] }, evidence, contract));
   assert.throws(() => validateDeck({ slides: [deck.slides[0], { ...deck.slides[1], layout: 'chart', figureId: 'fake' }] }, evidence, board, f.sources), /provenance/);
 });
 test('targeted patch has exact affected IDs and keeps unaffected slides immutable', () => {
@@ -245,7 +249,7 @@ test('durable stale artifact or invalid cached evidence refs reject resume befor
   await assert.rejects(() => new Pipeline(f.store).run(), /Stale\/tampered/); assert.equal(f.registry.calls.length, calls);
   await f.store.track('narrative/storyboard.yaml');
   await f.store.artifact('evidence/evidence.json', { ...evidence, claims: [{ ...evidence.claims[0], citations: [{ sourceId: 'invented', quote: 'fake' }] }] });
-  await assert.rejects(() => new Pipeline(f.store).run(), /Invalid citation/); assert.equal(f.registry.calls.length, calls);
+  await assert.rejects(() => new Pipeline(f.store).run(), /unknown source/); assert.equal(f.registry.calls.length, calls);
 });
 test('generated design config edits revoke approval; invalid state skips rejected', async t => {
   const f = await fixture(); t.after(f.cleanup);
@@ -255,8 +259,8 @@ test('generated design config edits revoke approval; invalid state skips rejecte
   await assert.rejects(() => f.store.gate(), /tampered/);
   assert.equal(f.store.checkpoint.approval, undefined);
 });
-test('structured output schema is strict and rejects executable extras', () => {
-  assert.throws(() => directorSchema.parse({ objective: 'a', thesis: 'b', successCriteria: ['c'], tools: ['bash'] }));
+test('control handoff ignores extra narrative metadata without executing it', () => {
+  assert.deepEqual(directorSchema.parse({ objective: 'a', thesis: 'b', successCriteria: ['c'], tools: ['bash'] }), { objective: 'a', thesis: 'b', successCriteria: ['c'] });
   assert.throws(() => z.object({ score: z.number().min(0).max(10) }).parse({ score: 11 }));
 });
 

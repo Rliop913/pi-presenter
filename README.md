@@ -1,144 +1,77 @@
-# Pi Presenter (MVP)
+# Pi Presenter — agent-owned skill
 
-Approval-gated, local-source presentation production for Pi. Package name: `@rliop/pi-presenter`. **Not published to npm.** No real presentation model calls or user-source deck validation have been performed for this implementation.
+Presenter is a **skill**, not a code-driven model workflow. `skills/presenter/SKILL.md` tells the approved coordinator how to delegate to real agents, read their untouched work, interpret independent review and decide revisions/completion.
 
-## Install locally
+## Ownership boundary
 
-Requires Node.js 22+ and a current Pi host exposing `ctx.modelRegistry.streamSimple()` and Pi AI's `getSupportedThinkingLevels()`.
+| Responsibility | Owner |
+| --- | --- |
+| Work decomposition, role delegation, source interpretation, narrative and design planning | Approved skill agent |
+| Factual/visual review | Fresh independent approved reviewer agents; natural-language reports |
+| Understanding review, choosing repairs, deciding readiness | Approved coordinator, not a parser/score function |
+| PPTX construction | Approved builder authors a normal PptxGenJS program |
+| Native approval, file hashes/path safety, real rendering and export confirmation | Narrow mechanical helpers |
 
-```sh
-npm install
-pi install ./
-# Or try once from this directory:
-pi --extension ./src/index.ts
-```
+There is **no schema/JSON requirement on research, planning or reviewer responses**, no exact quotation/numeric/typography gate and no normalized evidence/argument/storyboard handoff. The intentional PPTX-generation program is code; other agents' language is not. Native configuration/tool arguments and software-generated file/provenance receipts remain machine-readable because software needs them. They do not judge model prose.
 
-Pi supplies the `@earendil-works/pi-coding-agent` and `@earendil-works/pi-ai` peers; both have `*` ranges. Runtime dependencies are PptxGenJS, YAML, and Zod. The manifest loads `./src/index.ts` and `./skills/presenter`. Pi loads TypeScript directly; no generated build is shipped.
-
-### Real rendering prerequisites
-
-Install **LibreOffice** (`soffice`) and **Poppler** (`pdftoppm`) and put their executables on Pi's PATH. On Windows, LibreOffice's `program` directory and the Poppler binary directory must be on PATH. Fonts Arial, Calibri, or Aptos must exist for consistent appearance. Verify:
-
-```sh
-soffice --version
-pdftoppm -v
-```
-
-Missing tools, bad PDF output, malformed PNGs, or wrong page counts fail closed. Production rendering is exclusively **compiled PPTX → LibreOffice PDF → pdftoppm PNGs**. No HTML previews, placeholder slides, or synthetic screenshots satisfy production QA.
-
-## Commands
-
-Run Pi in any project. Sources are freeform text the user pastes into the wizard; no project-root files are required.
-
-| Command | Behavior |
-|---|---|
-| `/presenter new` | Collect user-defined contract and all seven assignments, show full approval matrix, then start only after **Approve & Start** |
-| `/presenter configure` | Revoke approval; edit contract + agents or agents only; show a new approval matrix |
-| `/presenter status` | Check integrity and show state, fingerprint, revision, artifact count and call count; no model calls |
-| `/presenter run` | Show approval dialog if awaiting approval, otherwise continue already-approved work |
-| `/presenter resume` | Revalidate saved approval, live registry, source hashes and artifact hashes; continue without silently approving |
-| `/presenter review` | Require a current built/rendered workspace; rerun factual and actual-image visual QA; revoke COMPLETE while reviewing |
-| `/presenter export` | Copy current PPTX to the contract's output path only when COMPLETE and all current QA hashes/scores pass |
-| `/presenter cancel` | Abort the owned operation/dialogs; keep validated checkpoints for resume |
-
-Setup collects title, purpose, audience, duration, slide count, **freeform text sources**, output path and requirements. Every field is validated as the user types: a typo on slide count, an empty output, an over-long title, or an absolute output path re-prompts the same dialog with the error so the wizard never aborts mid-flight. Sources are 1–20 natural-language context chunks (not file paths): the user pastes each chunk into its own dialog; after the first source, leaving the dialog empty finishes the list. Input dialogs show existing/default values as placeholders: enter the value you want to retain. Native `input`, `select` and `notify` dialogs work in TUI and dialog-capable RPC; headless modes cannot create approval. Cancellation never initiates production. Entering configure revokes existing approval, even if a later dialog is cancelled.
-
-**Before approval there are no presentation model calls, evidence extraction/research, narrative/design calls, or compilation.** Reading the user-supplied config files to fingerprint the approved inputs and discovering the synchronous available registry are configuration validation, not research. The initial contract is supplied by the user as freeform text. Director refinement happens only after approval and cannot change approved counts, sources, output or scope.
-
-### Exact assignments, not aliases or fallback
-
-Roles: `director`, `evidence_researcher`, `narrative_architect`, `art_director`, `visual_designer`, `fact_reviewer`, `visual_reviewer`.
-
-Presets suggest IDs only, not presumed providers or executable defaults:
-
-| Preset | Director | Evidence | Narrative | Art | Visual | Fact | Visual review | Suggested effort |
-|---|---|---|---|---|---|---|---|---|
-| economy | gpt-5.6-terra | gpt-5.6-luna | gpt-5.6-terra | gpt-5.6-terra | gpt-5.6-luna | gpt-5.6-terra | gpt-5.6-terra | medium; Evidence low |
-| balanced | gpt-5.6-sol | gpt-5.6-luna | gpt-5.6-sol | gpt-5.6-sol | gpt-5.6-terra | gpt-5.6-sol | gpt-5.6-sol | high; Evidence and Visual medium |
-| maximum | gpt-6-astra | gpt-5.6-sol | gpt-6-astra | gpt-6-astra | gpt-5.6-sol | gpt-6-astra | gpt-6-astra | high |
-
-Every role requires an explicit selection from the actual credential-available Pi registry, preserving exact **provider + model ID + effort**. Missing suggested IDs require explicit replacement. Visual review requires image input capability. Effort choices come from the host helper, not a hardcoded model-name heuristic. No silent clamp, model substitution, provider guess, or fallback is allowed. A provider reporting a different response model also fails closed; alias/snapshot mismatches may therefore need an exact catalog assignment.
-
-Approval records the full matrix and a SHA-256 fingerprint of raw presentation/agent configuration, source text hashes, and relevant registry capability/effort metadata. Any change to those inputs invalidates approval. The generated design-system configuration is also hash-tracked; changing it revokes approval. Reconfigure to restart after stale artifacts or config changes. Checkpoint hashes detect accidental edits, **not an attacker rewriting both files and checkpoint hashes**; this is not a signature scheme.
-
-## Pipeline and artifacts
+## Skill resources
 
 ```text
-UNINITIALIZED → PRESENTATION_DEFINED → AGENTS_CONFIGURED → AWAITING_APPROVAL
- → APPROVED → RESEARCH → STORYBOARD → DESIGN → BUILD → QA → COMPLETE
-                                                   ↑        |
-                                                   +--------+ bounded revision
+skills/presenter/
+  SKILL.md
+  references/orchestration.md
+  references/pptx-authoring.md
+  scripts/pptx.mjs              # PptxGenJS library adapter only
 ```
 
-The workflow owns isolated provider calls: fresh system/user messages, no parent conversation, no agent tools, no arbitrary executable commands from models. Calls are sequential and bounded (180 calls, 180 seconds/call, 12k maximum output tokens, strict output schemas and payload bounds). Actual provider-native effort mapping remains the host's responsibility. Requested exact effort, role/model, task, timestamps, usage and outcomes are recorded in the checkpoint trace; command-owned usage is not billable.
+References resolve relative to the skill directory. The adapter does not invent content, constrain slide layouts or run a model.
 
-Every isolated call fires a `DispatchEvent` to the host (`start` / `success` / `error`) with role, call index, call budget, provider/model/effort, task preview, elapsed time and token usage. The extension forwards these as `ctx.ui.notify` messages so a long pipeline is visible in real time:
+The optional companion extension supplies `presenter_authority` and `presenter_files`. It is optional packaging/integration, but native approval remains mandatory for this workflow: if those helpers are unavailable, the skill must stop, not synthesize authority.
 
-```text
-[1/180] director (mock-provider/mock-exact, effort=medium) — Refine the user contract into an objective, …
-[1/180] director ✓ in 2.4s, 12→20 tokens
-[2/180] evidence_researcher (mock-provider/mock-exact, effort=low) — Extract an evidence claim database …
-[2/180] evidence_researcher ✓ in 3.1s, 18→42 tokens
-[3/180] narrative_architect (mock-provider/mock-exact, effort=high) — Create a logical argument map …
-[3/180] narrative_architect ✗ in 1.8s: Model must return strict JSON, no Markdown fences
-```
+## Approval and use
 
-```text
-.presentation/
-  config/presentation.yaml       # user contract
-  config/agents.yaml             # exact assignments
-  config/design-system.yaml     # approved-run Art Director output
-  checkpoint.json               # durable state, approval, hashes, trace
-  evidence/sources.json
-  evidence/evidence.json         # canonical combined database
-  evidence/claims.json
-  evidence/figures.json
-  narrative/director-contract.yaml
-  narrative/argument-map.yaml
-  narrative/director-acceptance.yaml
-  narrative/storyboard.yaml
-  deck/deck-spec.yaml
-  deck/before-revision-N.yaml
-  deck/patch-N.yaml
-  renders/presentation.pdf
-  renders/slide-N.png
-  renders/manifest.json
-  reviews/fact-N.json
-  reviews/visual-N-SLIDE.json
-  reviews/visual-N.json
-  output/presentation.pptx
-```
+1. Load `/skill:presenter` and describe the presentation.
+2. The agent uses `presenter_authority new` (or `/presenter new`) to save **pending** configuration. No production work starts and no approval is implied.
+3. Before approval, the agent aligns `.presentation/config/presentation.yaml` metadata with the actual user brief. Defaults must not override requested count/duration/output.
+4. `presenter_authority approve` opens the native full source/assignment/effort matrix and agent-execution disclosures. Only the user's **Approve & Start** grants authority.
+5. `/presenter run|resume|review|export` merely hands off instructions to the skill agent. It never constructs a `Pipeline`, streams a model, parses a reviewer verdict or retries a worker.
+6. The agent uses `presenter_files authorize` before work, launches actual isolated agents, preserves versioned raw notes/reports and records genuine lifecycle results.
 
-Evidence claims require exact source quotes and valid source IDs. Numbers are conservatively checked against literal citations: a numeric-bearing claim must be an exact sourced statement; numeric titles must be an exact supported claim substring. No derived arithmetic. Charts require literal label/value associations and source unit provenance. Models cannot invent claim references. Qualitative entailment and nuanced data interpretation still require the fact reviewer and human judgment.
+If the host agent is not the approved planner identity/effort, it only routes to an approved fresh planner/coordinator. Do not insert an unapproved host model into presentation content/QA. Missing identities, unsupported effort, missing topology/deadline controls or credentials mean stop; no fallback or clamp.
 
-Narrative Architect builds an argument map; Director must accept it at narrative ≥8 before storyboard. Storyboards must match the approved slide count and valid claims. Art Director emits a bounded design system. Visual Designer can choose only fixed layouts from the schema. Compiler inserts evidence text directly, not model-authored executable content. Titles and storyboard claim IDs remain immutable during visual design/revisions.
+Tool-capable agent execution is a **new approval boundary**. Existing four/seven-role pipeline approvals keep their configuration/fingerprint history but cannot silently authorize the new mode. The new native approval records `skill/authority.json`. No real workspace approval is written by code migration or offline tests.
 
-The five widescreen layouts are **title, two-column, bullets, process, chart**. Text, shapes and charts are editable. Typography, margins and density limits are fixed. Slide footers and speaker notes carry citation refs/quotes. Geometry/spec interpretation is deterministic, but **PPTX bytes are not promised identical**: ZIP timestamps and document metadata are not normalized.
+## Mechanical file operations
 
-Fact review must score factual ≥9 and narrative ≥8. Actual PNG image blocks are sent to the vision reviewer separately for every slide; narrative, hierarchy, consistency and readability must each be ≥8. Any major/critical finding blocks completion regardless of scores. Director integrates failed reviews into a slide-specific patch plan. Only named affected slides can change; all blocking findings must be covered, and unaffected specs/evidence/design/storyboard are preserved. The default is two revision attempts (configurable `maxRevisions` 0–3 before approval). Each patch recompiles, rerenders and rechecks the whole deck. A factual/narrative error requiring evidence or storyboard changes intentionally cannot be repaired by the visual patcher: correct sources/requirements and reconfigure. Exhaustion or failure leaves export blocked.
+`presenter_files` explicitly performs one requested operation:
 
-## Source and safety limits
+- `authorize`: validate current native scope and return exact assignments/sources.
+- `register`: hash an existing file under `.presentation/skill/`.
+- `render`: inspect actual PPTX page structure and run real LibreOffice PDF → Poppler PNG conversion.
+- `references`: collect bounded approved design-site link/metadata inspiration only.
+- `record-review`: bind an untouched `.md`/`.txt` report and actual job/model/effort/page metadata to the current render. **Recording is not QA acceptance.**
+- `export`: require current factual/per-page reports and the user's native **Approve export** confirmation, then copy the verified bytes to the approved destination.
 
-Sources are **freeform text** the user pastes into the wizard. The package never reads source files from disk, so there is no path traversal, no image/CSV/PDF ingestion, and no `pdftotext`/LibreOffice extraction step. Every source is treated as untrusted natural-language context; the model must quote it verbatim. No web research, OCR, network asset fetching, generated images, SVG, or remote sources. Export must be a root-relative `.pptx` outside `.presentation` and can overwrite that approved destination.
+The coordinator reads the full reports, retains all approved quality requirements and resolves substantive blocking issues. Helpers do not interpret scores, severity prose or acceptance words. Before requesting final export the coordinator explains its QA decision. The native dialog explicitly states the distinction between mechanical verification and semantic judgment.
 
-Limits: 1–20 sources, 300k characters per source, 500k characters total, 30 slides, bounded claim/title lengths and density. Model prompt instructions explicitly classify all source/artifact data as untrusted; deterministic validation and absence of tools reduce prompt injection risks but cannot guarantee semantic model compliance. LibreOffice/Poppler process the generated PPTX and slide PNGs with host permissions; keep them patched. This extension is not a sandbox.
+Use versioned files instead of overwriting registered work. New drafts need new actual renders and independent reviews. Old pipeline checkpoints/JSON reviews never certify a skill-produced draft.
 
+`/presenter dependencies` remains a separate native **Approve installation** flow. No installation, asset/source/network expansion, source-executable instructions or approval substitution is implied by a presentation request. Builder programs use host trust/permissions; the helper is not a sandbox. Review metadata is an auditable agent assertion, not cryptographic proof of the agent runtime.
 
+## Historical engine retirement
 
-One exclusive disk operation lock covers setup/run/review/export. Normal errors/cancel release it. Atomic writes use temp files, file fsync and rename; each completed unit is hash-checkpointed. Resume reuses only validated registered artifacts, never leftover files. A process crash between an artifact rename and checkpoint update can conservatively require reconfiguration rather than reuse partially committed data. Directory fsync/power-loss durability is not guaranteed on every filesystem. After a hard crash, inspect `.presentation/operation.lock` and verify its recorded PID is dead before deleting the lock; do not remove a live process's lock.
+The old `Pipeline` run/review/export and `Dispatcher.call` entrypoints now stop before any model work. Old engine sources/tests and real-run artifacts remain as historical material, **not a supported production route**. The package allowlist and production import graph exclude `pipeline`, `dispatch`, `natural-flow`, `compact`, the old analysis `schema`, `evidence`, `compiler`, `renderer`, recovery and heartbeat engines. They are not published as runtime APIs. No history or pre-existing `.pi/` was deleted.
 
-## Verification / current status
+`npm test` now explicitly runs current skill/authority/file operations, catalog compatibility and dependency/network-boundary tests. Tests for the removed automatic model pipeline are retained as historical specifications; their former totals are not claimed as validation of this architecture.
 
-```sh
-npm install
-npm run typecheck
-npm test
-npm pack --dry-run
-```
+## Verification status — repository migration verified; live execution pending
 
-Validation on the implementation environment: TypeScript passed; **32 tests passed, 0 failed/skipped**; installed Pi's native extension loader reported one extension, `/presenter`, and zero loading errors; package dry-run includes 17 files and excludes tests/mocks. Active LSP probes were inconclusive (no clean confirmation); `tsc` is the authoritative type check.
+- With `PRESENTER_REAL_RENDER_TEST=1`, **76 tests all pass**, including actual editable PPTX generation and LibreOffice PDF → Poppler PNG conversion in disposable test fixtures. The default suite skips that one opt-in real-render test. Tests do not establish live M3 semantic orchestration or production approval.
+- Production AST/import-graph checks pass: no model streaming or workflow controller reachable from the production entrypoint.
+- Raw multilingual/Markdown/non-JSON report preservation, authority migration, handoff-only commands, native export cancellation, stale bindings, exact reviewer metadata, path/receipt safety and separate installation checks pass.
+- `npm run typecheck` and `git diff --check` pass. After explicit user permission, the missing dispatcher retirement helper was added and its retirement regression test passes.
+- The current-session extension registers its own `pdje_presenter_authority` / `pdje_presenter_files` helpers as well as command aliases. The prior alias-only registration omission was found during live preflight and fixed. Names do not collide with canonical package tools; registration starts no model call or workflow. Strict standalone typecheck and three session regression tests pass. Reload is required to replace the in-memory extension; repository edits do not update the installed user-skill checkout.
+- `npm pack --dry-run` verifies that the production package excludes the retired engines. Nothing was published or committed.
+- The catalog lists `minimax/MiniMax-M3` with credentials configured; its live API has not been tested in this migration. Real validated LibreOffice `.com` / Poppler discovery and a two-slide mechanical render smoke test pass. The smoke test uses mocked native UI only in disposable OFFLINE fixtures, zero model calls and no semantic QA or certified export; it never creates authority in the live workspace. The current session still exposes no new presenter helpers before reload, and no live agent-mode authority receipt exists.
 
-Dependency caveat: PptxGenJS is pinned to 4.0.0. `npm audit` still reports **one high-severity transitive `image-size` advisory group** (ICNS/JXL/HEIF parser denial of service). Those input formats are not accepted by this pipeline, but the installed dependency is not patched. `npm audit fix` did not resolve it within the allowed version range. Review/update the upstream dependency before production deployment; do not use force-upgrades blindly. Environment policy also blocked three dependency lifecycle scripts during install; tests/typecheck still passed.
-Tests are offline. They cover preapproval command/dispatch/compiler/ingestion denial; wizard cancellation; exact identities/effort/vision; edits/fingerprints; cancellation and locks; evidence/ref/provenance failures; targeted immutability; bounded revisions; stale resume/export; and actual ZIP/XML/PPTX chart/image compilation across all layouts. **MOCK integration fixtures explicitly mock model responses and slide rendering**, while using the real compiler. Missing executable tests and fixed-argv/page-count tests verify fail-closed renderer behavior; they are not real rendering certification. Mocks are under `tests/`, excluded from the package, and cannot be selected by production configuration.
-
-Remaining validation: install external rendering tools, use real user sources, explicitly approve available exact assignments, run the workflow, inspect actual rendered slides and PowerPoint/LibreOffice output, and evaluate model review quality. This MVP has not been published, committed, or demonstrated with real presentation model calls. See `examples/` for a small local source and contract example, not a certified/generated deck.
+The repository migration, adapter and real mechanical renderer checks pass. Live-session deployment, M3 orchestration, independent semantic/image QA and PDJE export remain unverified; they require reload and genuine native agent-mode approval. Repeat the real-render suite with: `powershell -NoProfile -Command '$env:PRESENTER_REAL_RENDER_TEST="1"; npm test; exit $LASTEXITCODE'`.
